@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Split the lead's tmux window and start an interactive Hermes teammate with a role.
+# usage: hermes-team-spawn <Role> <role description...>
+#        hermes-team-spawn --kill <Role>|--all
+export PATH="$HOME/.local/bin:$PATH"
+my_pane() {  # the tmux pane whose process is an ancestor of this script
+  local p=$$ id map; map=$(tmux list-panes -a -F '#{pane_pid} #{pane_id}' 2>/dev/null) || return 1
+  while [ "${p:-1}" -gt 1 ]; do
+    id=$(awk -v p="$p" '$1==p{print $2}' <<<"$map"); [ -n "$id" ] && { echo "$id"; return; }
+    p=$(ps -o ppid= -p "$p" | tr -d ' ')
+  done; return 1; }
+
+LEAD=$(my_pane) || { echo "ERROR: Hermes is not running inside tmux. Ask the user to start it with 'hermes-wsl' (Windows) or 'hermes-tmux' (Linux/WSL)." >&2; exit 1; }
+WIN=$(tmux display -p -t "$LEAD" '#{session_name}:#{window_index}')
+
+if [ "$1" = "--kill" ]; then
+  tmux list-panes -t "$WIN" -F '#{pane_id} #{@role}' | while read -r id role; do
+    [ "$id" = "$LEAD" ] && continue
+    if [ "$2" = "--all" ] || [ "${role,,}" = "${2,,}" ]; then tmux kill-pane -t "$id" && echo "stopped $role"; fi
+  done
+  tmux select-layout -t "$WIN" main-vertical >/dev/null; exit 0
+fi
+
+[ $# -ge 2 ] || { echo "usage: hermes-team-spawn <Role> <role description>" >&2; exit 2; }
+ROLE=$(tr -c 'A-Za-z0-9_\n' '_' <<<"$1"); shift; DESC="$*"
+[ -n "$(tmux display -p -t "$LEAD" '#{@role}')" ] || tmux set -p -t "$LEAD" @role lead
+if tmux list-panes -t "$WIN" -F '#{@role}' | grep -qix "$ROLE"; then echo "teammate '$ROLE' already exists"; exit 0; fi
+
+tmux set -w -t "$WIN" pane-border-status top
+tmux set -w -t "$WIN" pane-border-format ' #{?@role,#{@role},#{pane_index}} '
+CWD=$(tmux display -p -t "$LEAD" '#{pane_current_path}')
+NEW=$(tmux split-window -d -t "$LEAD" -c "$CWD" -P -F '#{pane_id}' "hermes-shared") || exit 1
+tmux set -p -t "$NEW" @role "$ROLE"
+tmux set -w -t "$WIN" main-pane-width 50%
+tmux select-pane -t "$LEAD"; tmux select-layout -t "$WIN" main-vertical >/dev/null   # lead left, team stacked right
+
+TEAM=$(tmux list-panes -t "$WIN" -F '#{@role}' | xargs)
+BRIEF="You are $ROLE, a teammate in a Hermes agent team. The lead (orchestrator) is the pane with role 'lead'. Your role: $DESC -- Rules: (1) Work only on what the lead assigns you; until then just wait. (2) When you finish a task, get blocked, or need a decision, report with the terminal command: hermes-team-msg lead \"<short report>\" - it is queued and delivered when the lead is idle, so do not wait for it. (3) To talk to another teammate: hermes-team-msg <Role> \"...\". See the team with: hermes-team-msg --list. (4) Messages to you arrive as '[from <role>] ...'. Do not edit files another teammate said it is working on. Current team: $TEAM. Reply 'ready' now."
+hermes-team-msg "$NEW" "$BRIEF" >/dev/null
+echo "spawned $ROLE in pane $NEW (brief queued; it starts in ~20s). Team: $TEAM"

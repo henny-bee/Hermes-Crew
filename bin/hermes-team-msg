@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Queue a message for a teammate pane. It is typed into that pane only when its Hermes is
+# idle, so it never interrupts a running turn. Returns immediately.
+# usage: hermes-team-msg <role|%pane-id> <message...>
+#        hermes-team-msg --list
+my_pane() {  # the tmux pane whose process is an ancestor of this script
+  local p=$$ id map; map=$(tmux list-panes -a -F '#{pane_pid} #{pane_id}' 2>/dev/null) || return 1
+  while [ "${p:-1}" -gt 1 ]; do
+    id=$(awk -v p="$p" '$1==p{print $2}' <<<"$map"); [ -n "$id" ] && { echo "$id"; return; }
+    p=$(ps -o ppid= -p "$p" | tr -d ' ')
+  done; return 1; }
+
+ME=$(my_pane); WIN=${ME:+$(tmux display -p -t "$ME" '#{session_name}:#{window_index}')}
+panes() { if [ -n "$WIN" ]; then tmux list-panes -t "$WIN" -F '#{pane_id} #{@role}'; else tmux list-panes -a -F '#{pane_id} #{@role}'; fi; }
+
+if [ "$1" = "--list" ]; then panes | awk '{printf "%s %s\n", $1, ($2==""?"(no role)":$2)}'; exit 0; fi
+[ $# -ge 2 ] || { echo "usage: hermes-team-msg <role|%pane> <message>   |  --list" >&2; exit 2; }
+
+T=$1; shift
+case "$T" in %*) TARGET=$T ;; *) TARGET=$(panes | awk -v r="$T" 'tolower($2)==tolower(r){print $1; exit}') ;; esac
+[ -n "$TARGET" ] || { echo "no pane with role '$T'. Team: $(panes | awk '{print $2}' | xargs)" >&2; exit 1; }
+FROM=$( [ -n "$ME" ] && tmux display -p -t "$ME" '#{@role}' ); FROM=${FROM:-user}
+MSG="[from $FROM] $(tr '\n' ' ' <<<"$*")"   # one line: a newline would act as Enter
+
+(
+  exec 9>"/tmp/hermes-team-${TARGET#%}.lock"; flock 9          # one delivery at a time per pane
+  for _ in $(seq 1800); do                                     # wait up to ~1h for idle
+    line=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null | grep '❯' | tail -1) || exit 0
+    # Hermes classic CLI: idle prompt line starts with "❯ "; busy line shows "msg=interrupt".
+    if [[ "$line" == "❯ "* && "$line" != *"msg=interrupt"* ]]; then
+      tmux send-keys -t "$TARGET" -l "$MSG"; sleep 0.4; tmux send-keys -t "$TARGET" Enter; sleep 3; exit 0
+    fi
+    sleep 2
+  done
+) >/dev/null 2>&1 &
+disown
+echo "queued for $T ($TARGET); delivered when it is idle"

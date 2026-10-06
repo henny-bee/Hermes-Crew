@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Start Hermes as the team "lead" inside tmux (so it can split panes for teammates).
+# One tmux session per folder; running it again in the same folder re-attaches.
+# usage: hermes-tmux [hermes args...]
+export PATH="$HOME/.local/bin:$PATH"
+command -v tmux >/dev/null || { echo "tmux is not installed (sudo apt install tmux)" >&2; exit 1; }
+[ -n "$TMUX" ] && exec hermes-shared "$@"
+
+NAME="hermes-$(basename "$PWD" | tr -c 'A-Za-z0-9_\n-' '_')"
+if ! tmux has-session -t "$NAME" 2>/dev/null; then
+  tmux new-session -d -s "$NAME" -c "$PWD" -x "$(tput cols 2>/dev/null || echo 200)" -y "$(tput lines 2>/dev/null || echo 50)" \
+    "hermes-shared${*:+ $(printf '%q ' "$@")}"
+  tmux set -t "$NAME" mouse on                       # click a pane to talk to that agent
+  tmux set -w -t "$NAME" pane-border-status top
+  tmux set -w -t "$NAME" pane-border-format ' #{?@role,#{@role},#{pane_index}} '
+  tmux set -p -t "$NAME" @role lead
+fi
+exec tmux attach -t "$NAME"
