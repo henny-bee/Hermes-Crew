@@ -198,4 +198,4 @@ Remove Hermes from WSL with `hermes uninstall` if you want.
 
 ## License
 
-[MIT](LICENSE) © 2026 Tiar Nur Azhar. Hermes Agent itself is a separate project with its own license.
+[MIT](LICENSE) © 2026 henny-bee. Hermes Agent itself is a separate project with its own license.
