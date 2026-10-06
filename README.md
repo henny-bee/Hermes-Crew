@@ -170,6 +170,7 @@ bin/hermes-team-spawn             create / stop teammates
 bin/hermes-team-msg               idle-aware messaging between panes
 bin/hermes-shared                 run Hermes; keep shared-config links healthy
 skill/hermes-tmux-team/SKILL.md   teaches Hermes the team workflow
+LICENSE                           MIT
 ```
 
 ---
@@ -194,3 +195,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 ```
 Removes the scripts, the skill and `hermes-wsl`. Hermes itself (and any shared-config links) stay.
 Remove Hermes from WSL with `hermes uninstall` if you want.
+
+## License
+
+[MIT](LICENSE) © 2026 Tiar Nur Azhar. Hermes Agent itself is a separate project with its own license.
