@@ -4,9 +4,10 @@ Hermes tmux team - Windows installer (runs install.sh inside WSL, then adds `her
   powershell -ExecutionPolicy Bypass -File .\install.ps1                       # standalone WSL Hermes
   powershell -ExecutionPolicy Bypass -File .\install.ps1 -ShareWindowsConfig   # reuse Windows Hermes settings
   powershell -ExecutionPolicy Bypass -File .\install.ps1 -Distro Ubuntu-24.04  # pick a WSL distro
+  powershell -ExecutionPolicy Bypass -File .\install.ps1 -Models "model-a model-b"  # allow different-model reviewers
   powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 #>
-param([string]$Distro, [switch]$ShareWindowsConfig, [switch]$Uninstall)
+param([string]$Distro, [switch]$ShareWindowsConfig, [string]$Models, [switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
 
 $d = @(); if ($Distro) { $d = @('-d', $Distro) }
@@ -15,6 +16,7 @@ if ($LASTEXITCODE -ne 0) { throw "WSL is not ready. Install it first:  wsl --ins
 
 $opts = @()
 if ($ShareWindowsConfig) { $opts += '--share-windows-config' }
+if ($Models)             { $opts += @('--models', $Models) }
 if ($Uninstall)          { $opts += '--uninstall' }
 & wsl.exe @d --cd $PSScriptRoot -e bash ./install.sh @opts
 if ($LASTEXITCODE -ne 0) { throw "install.sh failed (exit $LASTEXITCODE)" }

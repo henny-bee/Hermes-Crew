@@ -9,7 +9,7 @@ command -v tmux >/dev/null || { echo "tmux is not installed (sudo apt install tm
 NAME="hermes-$(basename "$PWD" | tr -c 'A-Za-z0-9_\n-' '_')"
 if ! tmux has-session -t "$NAME" 2>/dev/null; then
   tmux new-session -d -s "$NAME" -c "$PWD" -x "$(tput cols 2>/dev/null || echo 200)" -y "$(tput lines 2>/dev/null || echo 50)" \
-    "hermes-shared${*:+ $(printf '%q ' "$@")}"
+    "hermes-shared -s hermes-tmux-team${*:+ $(printf '%q ' "$@")}"   # preload the team skill for the lead
   tmux set -t "$NAME" mouse on                       # click a pane to talk to that agent
   tmux set -w -t "$NAME" pane-border-status top
   tmux set -w -t "$NAME" pane-border-format ' #{?@role,#{@role},#{pane_index}} '
