@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # Hermes tmux team - installer for WSL / Linux.
-# usage: ./install.sh [--share-windows-config] [--uninstall]
+# usage: ./install.sh [--share-windows-config] [--models "<model> <model>..."] [--uninstall]
 #   --share-windows-config  (WSL only) use the same config/keys/skills/memories as Windows Hermes
+#   --models "a b"          models teammates may use (enables different-model reviewers)
 #   --uninstall             remove the team scripts and skill (Hermes itself is kept)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 BIN="$HOME/.local/bin"
 CONF="$HOME/.config/hermes-team.conf"
 HH="${HERMES_HOME:-$HOME/.hermes}"
-TOOLS="hermes-shared hermes-tmux hermes-team-spawn hermes-team-msg"
+TOOLS="hermes-shared hermes-tmux hermes-team-spawn hermes-team-msg hermes-team-board"
 MARK="# hermes-tmux-team"
-SHARE=0; UNINSTALL=0
-for a in "$@"; do case "$a" in
+SHARE=0; UNINSTALL=0; MODELS=""
+set_conf() {  # set KEY=VALUE in $CONF, keeping other keys
+  mkdir -p "$(dirname "$CONF")"; touch "$CONF"
+  grep -v "^$1=" "$CONF" > "$CONF.tmp" || true
+  printf '%s=%q\n' "$1" "$2" >> "$CONF.tmp"; mv "$CONF.tmp" "$CONF"; }
+while [ $# -gt 0 ]; do a=$1; shift; case "$a" in
+  --models) MODELS=${1:-}; shift ;;
   --share-windows-config) SHARE=1 ;;
   --uninstall) UNINSTALL=1 ;;
   -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
@@ -56,7 +62,7 @@ if [ "$SHARE" = 1 ]; then
   WIN_HOME="$(wslpath "$LAD")/hermes"
   [ -f "$WIN_HOME/config.yaml" ] || die "No Windows Hermes found at $WIN_HOME (install Hermes on Windows first, or drop --share-windows-config)"
   mkdir -p "$(dirname "$CONF")" "$HH/.pre-share-backup"
-  printf 'WIN_HOME=%q\n' "$WIN_HOME" > "$CONF"
+  set_conf WIN_HOME "$WIN_HOME"
   # Files and folders that are shared. Databases/sessions/logs stay separate on purpose:
   # SQLite across the Windows/WSL file boundary can corrupt.
   for item in config.yaml .env auth.json SOUL.md skills memories; do
@@ -70,6 +76,7 @@ fi
 # 4) team scripts + skill
 mkdir -p "$BIN"
 for t in $TOOLS; do install -m 755 "$HERE/bin/$t" "$BIN/$t"; done
+[ -n "$MODELS" ] && set_conf HERMES_TEAM_MODELS "$MODELS"
 SK="$HH/skills/autonomous-ai-agents/hermes-tmux-team"
 mkdir -p "$SK" && cp "$HERE/skill/hermes-tmux-team/SKILL.md" "$SK/SKILL.md"
 grep -q "$MARK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\nalias hermes=hermes-shared\n' "$MARK" >> "$HOME/.bashrc"

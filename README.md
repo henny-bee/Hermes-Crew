@@ -48,7 +48,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -ShareWindowsConfig
 ```
 
-Options: `-Distro <name>` to target a specific WSL distro, `-Uninstall` to remove.
+Options: `-Distro <name>` to target a specific WSL distro, `-Uninstall` to remove,
+`-Models "model-a model-b"` to list the models teammates may use (see *Model diversity* below).
 
 The installer:
 - installs `tmux` (asks for your Linux sudo password) and Hermes Agent inside WSL,
@@ -61,6 +62,7 @@ Open a **new** terminal afterwards.
 
 ```bash
 ./install.sh                         # or: ./install.sh --share-windows-config  (WSL only)
+                                     # add --models "model-a model-b" for different-model reviewers
 source ~/.bashrc
 ```
 
@@ -127,9 +129,14 @@ Only change the **Goal** line for other jobs. When done, type `stop the team`.
 |---|---|
 | `hermes-wsl [args]` | (Windows) open WSL Hermes in tmux as `lead`, in the current folder |
 | `hermes-tmux [args]` | (WSL/Linux) same thing from a Linux shell |
-| `hermes-team-spawn <Role> "<description>"` | split the window, start a Hermes teammate with that role |
+| `hermes-team-spawn [--model M] <Role> "<description>"` | split the window, start a Hermes teammate with that role (optionally on another model) |
+| `hermes-team-spawn --models` | models available for teammates |
 | `hermes-team-spawn --kill <Role>` / `--kill --all` | stop one / all teammates |
-| `hermes-team-msg <Role\|lead> "<text>"` | queue a message; typed in when the target is idle |
+| `hermes-team-msg <Role\|lead> "<text>"` | queue a message; typed in when the target is idle (shows send time) |
+| `hermes-team-board decide [--replaces <#>] "<decision>"` | record a shared decision (names, interfaces, formats, numbers); replaced ones disappear from `status` |
+| `hermes-team-board own <file>` | claim a file; only its owner edits it |
+| `hermes-team-board approve <file> "<what was checked>"` | approve the file's *current content* (non-owners only) |
+| `hermes-team-board status` | team state, decisions, owners, approvals (`OK` / `STALE`) |
 | `hermes-team-msg --list` | show the team (pane id + role) |
 | `hermes-shared [args]` | plain Hermes (heals shared-config links first) |
 
@@ -152,8 +159,23 @@ Extra args go to Hermes, e.g. `hermes-wsl -c` resumes the last session.
    interactive session, so the message is **typed into the target pane** — but only when that Hermes
    is idle. It watches the prompt line: `❯ …` = idle, `… msg=interrupt …` = busy (typing then would
    interrupt the turn). Delivery runs in the background, one message at a time per pane (`flock`),
-   prefixed with the sender: `[from Engineer] …`.
-5. **`hermes-shared`** (only matters with `--share-windows-config`): `config.yaml`, `.env`,
+   prefixed with sender and send time: `[from Engineer sent 14:02:11] …`.
+5. **`hermes-team-board`** keeps the team honest without assuming any roles. It is an append-only
+   log in `<project>/.team/board.log`:
+   - **decisions** — the single source of truth for anything several files must agree on;
+   - **ownership** — one owner per file; others send the owner change requests;
+   - **approvals bound to content** — an approval stores the file's hash and *what was checked*;
+     owners cannot approve their own files; when the file changes the approval shows **STALE**.
+
+   Every teammate's brief contains the same role-agnostic protocol (check decisions, own your files,
+   review real content, never claim unrun checks, no acknowledgement-only messages). The lead may only
+   report "done" when `hermes-team-board status` shows every deliverable with an OK approval from a
+   non-owner — otherwise it must say what is unverified.
+6. **Model diversity.** Agents on the same model share blind spots and tend to agree. With
+   `--models` configured, the lead gives reviewing roles a different model than the authors
+   (`hermes-team-spawn --model …`); pane borders show each teammate's model. With a single model the
+   lead tells you that reviews are same-model.
+7. **`hermes-shared`** (only matters with `--share-windows-config`): `config.yaml`, `.env`,
    `auth.json`, `SOUL.md`, `skills/`, `memories/` in `~/.hermes` are symlinks to
    `%LOCALAPPDATA%\hermes`. Hermes saves config files atomically, which turns a symlink into a plain
    file; before every start `hermes-shared` copies a newer WSL copy back to Windows (keeping a
@@ -168,6 +190,7 @@ install.sh                        WSL/Linux installer
 bin/hermes-tmux                   start the lead in tmux
 bin/hermes-team-spawn             create / stop teammates
 bin/hermes-team-msg               idle-aware messaging between panes
+bin/hermes-team-board             shared decisions, file ownership, content-bound approvals
 bin/hermes-shared                 run Hermes; keep shared-config links healthy
 skill/hermes-tmux-team/SKILL.md   teaches Hermes the team workflow
 LICENSE                           MIT

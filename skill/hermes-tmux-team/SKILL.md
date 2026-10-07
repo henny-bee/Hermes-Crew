@@ -1,7 +1,7 @@
 ---
 name: hermes-tmux-team
-description: "Create a visible agent team: split the tmux window and start one interactive Hermes teammate per role (planner, engineer, reviewer, ...), with you as lead/orchestrator. Use whenever the user asks to create a team, teammates, agents or roles that should work in parallel."
-version: 1.0.0
+description: "Create a visible agent team: split the tmux window and start one interactive Hermes teammate per role, with you as lead/orchestrator. Use whenever the user asks to create a team, teammates, agents or roles that should work in parallel."
+version: 2.0.0
 author: hermes-tmux-team
 license: MIT
 platforms: [linux]
@@ -9,59 +9,82 @@ metadata:
   hermes:
     tags: [team, multi-agent, tmux, orchestration]
 prerequisites:
-  commands: [tmux, hermes-team-spawn, hermes-team-msg]
+  commands: [tmux, hermes-team-spawn, hermes-team-msg, hermes-team-board]
 ---
 
 # Hermes tmux team (Claude Code style agent teams)
 
-You are the **lead** (orchestrator). Each teammate is a separate interactive Hermes
-process in its own tmux pane, visible to the user. Use this instead of `delegate_task`
-whenever the user asks for a team / teammates / named agents / roles.
+> **MANDATORY:** When the user asks for a team, teammates or named roles, you MUST create
+> real teammates with `hermes-team-spawn` (one terminal call per role) BEFORE doing any of
+> the work. Never write the teammates' output yourself (no role-play / simulated team) and
+> never use `delegate_task` for a named team. If spawning fails, report the error instead.
 
-## 1. Spawn teammates (one terminal call each)
+You are the **lead** (orchestrator). Each teammate is a separate interactive Hermes process
+in its own tmux pane. The roles come from the user's request — this skill does not assume
+any particular roles. What it adds is structure that keeps any team honest:
 
-```bash
-hermes-team-spawn Planner "Breaks the goal into concrete steps and acceptance criteria."
-hermes-team-spawn Engineer "Implements the plan: edits files, runs commands and tests."
-hermes-team-spawn Supervisor "Reviews the Engineer's work against the plan; approves or requests changes."
-```
+| Mechanism | Tool |
+|---|---|
+| Shared decisions (names, interfaces, formats, numbers) | `hermes-team-board decide "..."` / `decide --replaces <#> "..."` |
+| One owner per file; others request changes from the owner | `hermes-team-board own <file>` |
+| Approvals bound to file content (expire when the file changes) | `hermes-team-board approve <file> "<what was checked>"` |
+| Ground truth for you | `hermes-team-board status` |
+| Messages (queued until the receiver is idle, timestamped) | `hermes-team-msg <Role> "..."` |
 
-- Role = one word (it becomes the pane label and the address for messages).
-- Description = the role text the user gave you, condensed.
-- If the user also asks for an "orchestrator"/"lead", that is **you** — do not spawn one.
-- If the command says Hermes is not inside tmux, tell the user to start Hermes with
-  `hermes-wsl` (Windows) or `hermes-tmux` (Linux/WSL) and stop.
-- Each teammate needs ~20s to start, then replies "ready".
+## 1. Plan the team (before spawning)
 
-## 2. Assign work
+From the user's request, write down for yourself:
+- **Roles** and what each produces.
+- **Ownership:** exactly one owner per deliverable file. Co-authored documents still get one
+  owner; contributors send content/changes to that owner.
+- **Review relations:** every deliverable that matters gets at least one reviewer who is
+  **not its owner**. Use the roles the user defined; if the user defined no reviewer for some
+  deliverable, assign a non-owner teammate as its reviewer.
+- **Model diversity:** run `hermes-team-spawn --models`. If more than one model is listed,
+  give reviewing roles a **different model** than the authors of what they review
+  (same-model reviewers share the author's blind spots and tend to agree). If only one model
+  exists, tell the user that reviews come from the same model.
 
-```bash
-hermes-team-msg Planner "Goal: <goal>. Produce a step plan, then send it to Engineer and report to lead."
-hermes-team-msg --list          # show roles and panes
-```
-
-Messages are queued and typed into the teammate's prompt only when it is idle, so
-they never interrupt. Give each teammate a self-contained task (goal, files, done-criteria).
-Tell teammates explicitly who to hand off to (e.g. Planner → Engineer → Supervisor → lead).
-
-## 3. Wait for reports — end your turn
-
-Teammates report with `hermes-team-msg lead "..."`. Their reports appear as new user
-messages in **your** prompt, prefixed `[from <Role>]`, delivered when you are idle.
-So after assigning work: summarize the plan for the user and **end your turn**.
-Do NOT sleep, poll, or loop waiting. When a `[from ...]` message arrives, react to it
-(next assignment, fix request, or final summary to the user).
-
-## 4. Finish
-
-When the work is done, give the user a summary, then stop the team if they agree:
+## 2. Spawn (one terminal call each)
 
 ```bash
-hermes-team-spawn --kill --all      # or: hermes-team-spawn --kill Engineer
+hermes-team-spawn <Role> "<role description from the user, condensed>"
+hermes-team-spawn --model <other-model> <ReviewRole> "<description>"
 ```
+Role = one word. Each teammate gets the team protocol automatically, starts in ~20s and
+replies "ready". The team directory is your current folder (`.team/board.log` lives there).
+
+## 3. Assign work
+
+Send each teammate a self-contained assignment: goal, input files, the files it **owns**,
+who reviews its files, who it hands off to, and done-criteria. Include the user's workflow
+steps verbatim where relevant.
+
+```bash
+hermes-team-msg <Role> "Goal ... You own X.md. Reviewer: <Role>. When done: ..."
+```
+
+## 4. Wait — end your turn
+
+Reports arrive in your prompt as `[from <Role> sent HH:MM:SS] ...` when you are idle. After
+assigning, summarize the plan to the user and **end your turn**. Do NOT sleep or poll. On each
+report, check `hermes-team-board status` before deciding the next step — never re-assign work
+the board or the files show as done, and ignore messages superseded by later ones.
+
+## 5. Definition of done (any team)
+
+Before telling the user the work is finished, run `hermes-team-board status` and confirm:
+1. every deliverable exists and has an owner,
+2. every deliverable has an **OK** approval from a non-owner (no `STALE`, no `!!`),
+3. the deliverables follow the recorded decisions.
+
+If something is STALE or unapproved, send it back for review instead of declaring success.
+In your final answer include the status output (or its summary) and list anything not
+verified. Then offer to stop the team: `hermes-team-spawn --kill --all`.
 
 ## Pitfalls
 
-- Never do teammates' work yourself in parallel on the same files — assign it.
-- Keep messages short; put long specs in a file in the project and send the path.
+- Don't do teammates' work yourself on the same files — assign it.
+- Long specs go into a file; send the path, not the text.
 - A teammate stuck on an approval prompt needs the user: say which pane.
+- A quiet team is not a finished team — check the board.

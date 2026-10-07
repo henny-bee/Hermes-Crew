@@ -20,7 +20,7 @@ T=$1; shift
 case "$T" in %*) TARGET=$T ;; *) TARGET=$(panes | awk -v r="$T" 'tolower($2)==tolower(r){print $1; exit}') ;; esac
 [ -n "$TARGET" ] || { echo "no pane with role '$T'. Team: $(panes | awk '{print $2}' | xargs)" >&2; exit 1; }
 FROM=$( [ -n "$ME" ] && tmux display -p -t "$ME" '#{@role}' ); FROM=${FROM:-user}
-MSG="[from $FROM] $(tr '\n' ' ' <<<"$*")"   # one line: a newline would act as Enter
+MSG="[from $FROM sent $(date +%H:%M:%S)] $(tr '\n' ' ' <<<"$*")"   # one line: a newline would act as Enter
 
 (
   exec 9>"/tmp/hermes-team-${TARGET#%}.lock"; flock 9          # one delivery at a time per pane
