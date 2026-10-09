@@ -1,0 +1,7 @@
+.claude/
+.team/
+*.bak-wsl-*
+__pycache__/
+*.pyc
+.pytest_cache/
+IMPROVEMENT-PLAN.md
