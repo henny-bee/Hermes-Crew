@@ -7,6 +7,9 @@ my_pane() {  # the tmux pane whose process is an ancestor of this script
     p=$(ps -o ppid= -p "$p" | tr -d ' ')
   done; return 1; }
 
+# NB: `tmux display -t %missing` succeeds with empty output (tmux 3.6), so look the pane up instead
+pane_exists() { tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qxF "$1"; }
+
 team_dir_of() { tmux show -wv -t "$1" @team_dir 2>/dev/null; }  # team dir of the window holding pane/window $1
 
 ensure_team() {  # create <dir>/.team; its own .gitignore keeps team state out of the user's repo

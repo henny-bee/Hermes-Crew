@@ -14,7 +14,8 @@ eq() { [ "$1" = "$2" ] || die "${3:-values differ}: expected [$1] got [$2]"; }
 has() { [[ $1 == *"$2"* ]] || die "${3:-missing text}: [$2] not in: ${1:0:400}"; }
 hasnt() { [[ $1 != *"$2"* ]] || die "${3:-unexpected text}: [$2] in: ${1:0:400}"; }
 wait_for() { local n=$(( $1 * 10 )); shift; while [ $n -gt 0 ]; do eval "$*" && return 0; sleep 0.1; n=$((n-1)); done; return 1; }
-await() { local s=$1 m=$2; shift 2; wait_for "$s" "$*" || die "timeout: $m"; }
+await() { local s=$1 m=$2; shift 2
+  wait_for "$s" "$*" || { echo "--- fake log:"; tail -5 "$FAKE_LOG" 2>/dev/null; echo "--- messages.log:"; tail -5 "$PROJ/.team/messages.log" 2>/dev/null; die "timeout: $m"; }; }
 
 # ---------- environment ----------
 new_env() {  # new_env <name> <short id> (short: tmux socket paths are length-limited): fresh HOME, isolated tmux server, fake hermes first in PATH
@@ -167,6 +168,11 @@ test_msg_not_delivered_while_half_typed() {
   tmux send-keys -t "$P" C-u; await 10 "delivery after clearing" "grep -q 'after typing' $FAKE_LOG"
   hasnt "$(lines_of)" "abc[from" "typed text got mixed with the message"; }
 
+test_msg_to_vanished_pane_expires_at_once() {
+  export FAKE_MENU=1 HERMES_TEAM_MSG_TIMEOUT=300; lead_start; fake_pane Eng; send hermes-team-msg Eng "nobody home"; sleep 1
+  tmux kill-pane -t "$P"; await 8 "expiry on pane loss" "grep -q 'expired' $PROJ/.team/messages.log"
+  lead_run hermes-team-msg %999 hi; eq 1 "$RC" "unknown pane id"; }
+
 test_msg_unknown_role() { lead_start; lead_run hermes-team-msg Nobody hi; eq 1 "$RC"; has "$OUT" "no pane with role"; }
 
 test_status_idle_busy() {
@@ -184,7 +190,7 @@ test_spawn_creates_labelled_cli_pane() {
   await 10 "args" "grep -q 'ARGS --cli -m m3' $FAKE_LOG"
   await 15 "brief" "grep -q 'You are Eng, a teammate' $FAKE_LOG"
   eq '*' "$(<"$PROJ/.team/.gitignore")"
-  lead_run hermes-team-spawn Rev "reviews"; eq 0 "$RC"; hasnt "$OUT" WARNING
+  lead_run hermes-team-spawn Rev "reviews"; eq 0 "$RC"; hasnt "$OUT" "HERMES_TEAM_MODELS"; has "$OUT" "plugin not installed"
   eq 2 "$(tmux list-panes -t t -F '#{@role}' | grep -vc '^lead$')" "teammates"
   # main pane is half the window width in columns (no "50%": needs tmux >= 3.3)
   eq "$(( $(tmux display -p -t t '#{window_width}') / 2 ))" "$(tmux show -wv -t t main-pane-width)"; }
@@ -218,19 +224,155 @@ test_hermes_tmux_inside_tmux_tags_lead() {
   await 10 "args" "grep -q 'ARGS --cli -s hermes-tmux-team extra-arg' $FAKE_LOG"
   eq lead "$(tmux display -p -t "$P" '#{@role}')"; eq "$PROJ" "$(tmux show -wv -t "$P" @team_dir)"; }
 
+# ======================= v3: plugin installed =======================
+plugin_installed() { mkdir -p "$HOME/.hermes/plugins/hermes-crew"; : > "$HOME/.hermes/plugins/hermes-crew/plugin.yaml"
+  ln -s "$ROOT/plugin/hermes-crew/hermes_crew" "$HOME/.hermes/plugins/hermes-crew/hermes_crew"; }
+v3_on() {  # plugin installed AND enabled
+  plugin_installed
+  printf 'model: x\nplugins:\n  enabled:\n    - hermes-crew\n' > "$HOME/.hermes/config.yaml"; }
+team_hash() { printf %s "$PROJ" | sha1sum | cut -c1-6; }
+
+test_spawn_v3_brief_file_and_pane_command() {
+  v3_on; lead_start; lead_run hermes-team-spawn --model m1 Eng "does engineering"; eq 0 "$RC" "$OUT"; hasnt "$OUT" "plugin not installed"
+  b=$PROJ/.team/briefs/Eng.md; [ -f "$b" ] || die "no brief file"
+  has "$(<"$b")" "You are Eng, a teammate"; has "$(<"$b")" "Your role: does engineering"; has "$(<"$b")" "Team directory: $PROJ"
+  has "$(<"$b")" "hermes-tmux-teammate"; has "$(<"$b")" "Wait for your assignment from lead; it arrives automatically."
+  hasnt "$(<"$b")" "ready" "the brief must not ask for a ready message"
+  cmd=$(tmux list-panes -t t -F '#{pane_start_command}' | grep Eng)
+  has "$cmd" "HERMES_TEAM_DIR=$PROJ"; has "$cmd" "HERMES_TEAM_ROLE=Eng"; has "$cmd" "HERMES_CREW_SESSION=t"
+  has "$cmd" "hermes-shared chat --cli -s hermes-tmux-teammate --continue team-$(team_hash)-Eng --create-if-missing --query-file $b -m m1"
+  await 10 "query" "grep -q 'QUERY You are Eng' $FAKE_LOG"; has "$(flog)" "ENV dir=$PROJ role=Eng session=t"
+  hasnt "$(lines_of)" "[from lead" "brief must not be typed into the pane in v3"
+  eq '*' "$(<"$PROJ/.team/.gitignore")"; }
+
+test_spawn_v3_brief_survives_odd_characters() {
+  v3_on; lead_start; d="say \"hi\" \$(touch $T/pwned) \`touch $T/pwned2\` 'quoted'"; lead_run hermes-team-spawn Eng "$(printf %q "$d")"; eq 0 "$RC" "$OUT"
+  await 10 "query" "grep -q 'QUERY You are Eng' $FAKE_LOG"; [ ! -e "$T/pwned" ] && [ ! -e "$T/pwned2" ] || die "description was executed"
+  has "$(<"$PROJ/.team/briefs/Eng.md")" "'quoted'"; }
+
+test_restart_resumes_named_session() {
+  v3_on; lead_start; lead_run hermes-team-spawn --model m1 Eng "does engineering"; await 10 "first start" "grep -q 'QUERY You are Eng' $FAKE_LOG"
+  old=$(tmux list-panes -t t -F '#{pane_id} #{@role}' | awk '$2=="Eng"{print $1}')
+  lead_run hermes-team-spawn --restart eng; eq 0 "$RC" "$OUT"; has "$OUT" "restarted Eng (m1)"
+  await 10 "restart query" "grep -q 'QUERY You were restarted' $FAKE_LOG"
+  has "$(flog)" "LINE /exit" "old pane was asked to exit"
+  new=$(tmux list-panes -t t -F '#{pane_id} #{@role}' | awk '$2=="Eng"{print $1}'); [ -n "$new" ] && [ "$new" != "$old" ] || die "no new pane ($old -> $new)"
+  eq 1 "$(tmux list-panes -t t -F '#{@role}' | grep -c Eng)"
+  has "$(tmux list-panes -t t -F '#{pane_start_command}' | grep Eng)" "--continue team-$(team_hash)-Eng --create-if-missing --query-file $PROJ/.team/briefs/Eng.restart.md -m m1"
+  has "$(<"$PROJ/.team/briefs/Eng.restart.md")" "hermes-crew task list --mine"
+  lead_run hermes-team-spawn --restart Nobody; eq 1 "$RC"; lead_run hermes-team-spawn --restart; eq 2 "$RC"; }
+
+test_spawn_v2_when_plugin_installed_but_not_enabled() {
+  plugin_installed; lead_start
+  for cfg in "" "plugins:\n  enabled: []\n" "plugins:\n  enabled:\n    - other\n  disabled:\n    - hermes-crew\n"; do
+    printf '%b' "$cfg" > "$HOME/.hermes/config.yaml"; tmux kill-pane -a -t "$LEAD"
+    lead_run hermes-team-spawn Eng "e"; eq 0 "$RC" "$OUT"; has "$OUT" "plugin is installed but not enabled: hermes plugins enable hermes-crew"
+    [ ! -e "$PROJ/.team/briefs/Eng.md" ] || die "v3 brief written although the plugin is not enabled"
+    hasnt "$(tmux list-panes -t t -F '#{pane_start_command}')" "hermes-tmux-teammate"; done
+  printf 'plugins:\n  enabled: [other, "hermes-crew"]\n' > "$HOME/.hermes/config.yaml"; tmux kill-pane -a -t "$LEAD"
+  lead_run hermes-team-spawn Eng "e"; hasnt "$OUT" "not enabled"; has "$(tmux list-panes -t t -F '#{pane_start_command}')" "hermes-tmux-teammate"; }
+
+test_restart_needs_plugin() { lead_start; lead_run hermes-team-spawn --restart Eng; eq 1 "$RC"; has "$OUT" "needs the hermes-crew plugin"; }
+
+test_kill_is_graceful_then_forced() {
+  export HERMES_TEAM_STOP_WAIT=2; v3_on; lead_start; lead_run hermes-team-spawn Eng "e"; await 10 "start" "grep -q 'QUERY You are Eng' $FAKE_LOG"
+  S=$(tmux split-window -d -P -F '#{pane_id}' -t "$LEAD" -c "$PROJ" "sleep 300"); tmux set -p -t "$S" @role Stuck   # ignores /exit
+  lead_run hermes-team-spawn --kill Eng; eq 0 "$RC"; has "$OUT" "stopped Eng"; has "$(flog)" "LINE /exit"
+  tmux list-panes -t t -F '#{@role}' | grep -q Eng && die "Eng still there"
+  s=$SECONDS; lead_run hermes-team-spawn --kill --all; eq 0 "$RC"; has "$OUT" "stopped Stuck"
+  tmux list-panes -a -F '#{pane_id}' | grep -q "$S" && die "stuck pane survived"; [ $((SECONDS - s)) -ge 2 ] || die "killed without waiting"; true; }
+
+test_spawn_refuses_beyond_max() {
+  export HERMES_TEAM_MAX=2; lead_start; lead_run hermes-team-spawn A a; lead_run hermes-team-spawn B b; eq 0 "$RC"
+  lead_run hermes-team-spawn C c; eq 1 "$RC"; has "$OUT" "already has 2 teammates (HERMES_TEAM_MAX)"; eq 3 "$(tmux list-panes -t t | wc -l)"
+  lead_run hermes-team-spawn A a; eq 0 "$RC"; has "$OUT" "already exists"; }
+
+test_msg_routes_to_mailbox_when_agent_is_alive() {
+  export FAKE_BUSY=1; v3_on; lead_start; fake_pane Eng; sleep 300 & SP=$!; trap 'kill $SP 2>/dev/null; tmux kill-server 2>/dev/null' EXIT
+  mkdir -p "$PROJ/.team/agents"; printf '{\n "role": "Eng",\n "pid": %s,\n "state": "idle"\n}\n' "$SP" > "$PROJ/.team/agents/Eng.json"
+  send hermes-team-msg Eng "via mailbox"; has "$OUT" "queued"
+  set -- "$PROJ"/.team/mail/Eng/new/*.json; f=$1; [ -f "$f" ] || die "nothing in mail/Eng/new ($OUT)"
+  has "$(<"$f")" "via mailbox"; has "$(<"$f")" '"from":"lead"'
+  sleep 1.5; hasnt "$(flog)" "via mailbox" "typed although the plugin delivers"
+  # agent exited cleanly or died -> typing fallback
+  printf '{"role":"Eng","pid":%s,"state":"exited"}\n' "$SP" > "$PROJ/.team/agents/Eng.json"
+  send hermes-team-msg Eng "typed one"; await 10 "typed" "grep -q 'typed one' $FAKE_LOG"
+  printf '{"role":"Eng","pid":999999,"state":"idle"}\n' > "$PROJ/.team/agents/Eng.json"
+  send hermes-team-msg Eng "typed two"; await 10 "typed" "grep -q 'typed two' $FAKE_LOG"; }
+
+test_board_is_a_wrapper_for_hermes_crew() {
+  has "$(grep -v '^#' "$ROOT/bin/hermes-team-board")" 'hermes-crew" board "$@"'; lead_start
+  lead_run hermes-team-board decide "via wrapper"; eq 0 "$RC"; has "$OUT" "decision #1 recorded"
+  lead_run hermes-team-board; eq 2 "$RC"; has "$OUT" "hermes-team-board decide"; }
+
+test_lead_gets_team_env() {
+  v3_on; mkdir -p "$T/a/proj"; (cd "$T/a/proj" && hermes-tmux </dev/null >/dev/null 2>&1)
+  await 5 "args" "grep -q 'ENV dir=$T/a/proj role=lead session=hermes-proj-' $FAKE_LOG"
+  s=$(tmux list-sessions -F '#{session_name}'); has "$(flog)" "session=$s"; }
+
 # ======================= installer =======================
 test_install_models_needs_value() {
   out=$(bash "$ROOT/install.sh" --models 2>&1); rc=$?; eq 2 "$rc"; has "$out" "--models needs a value"
   out=$(bash "$ROOT/install.sh" --models --uninstall 2>&1); eq 2 "$?"; has "$out" "--models needs a value"; }
 
-test_install_into_temp_home_finds_hermes_on_path() {
-  mkdir -p "$T/extra"; ln -s "$ROOT/tests/fake-hermes" "$T/extra/hermes"; rm -f "$HOME/.local/bin"/*     # a HOME that has no ~/.local/bin/hermes
-  PATH=$T/extra:$PATH bash "$ROOT/install.sh" --models "m1 m2" >"$T/install.out" 2>&1 || die "install failed: $(<"$T/install.out")"
-  has "$(<"$T/install.out")" "Using Hermes found at $T/extra/hermes"
-  for t in hermes-shared hermes-tmux hermes-team-lib hermes-team-spawn hermes-team-msg hermes-team-board; do [ -x "$HOME/.local/bin/$t" ] || die "$t not installed"; done
+test_install_and_uninstall_leave_nothing_behind() {
+  rm -rf "$HOME"; mkdir -p "$HOME" "$T/extra"; printf '# mine\nalias ll=ls\n' > "$HOME/.bashrc"; cp "$HOME/.bashrc" "$T/bashrc.orig"
+  cat > "$T/extra/hermes" <<STUB
+#!/usr/bin/env bash
+echo "\$*" >> "$T/hermes.calls"
+echo "ARGS \$*" >> "$FAKE_LOG"
+STUB
+  chmod +x "$T/extra/hermes"
+  export PATH=$T/extra:/usr/local/bin:/usr/bin:/bin                 # $HOME/.local/bin deliberately not on PATH
+  bash "$ROOT/install.sh" --models "m1 m2" >"$T/install.out" 2>&1 </dev/null || die "install failed: $(<"$T/install.out")"
+  has "$(<"$T/install.out")" "Using Hermes found at $T/extra/hermes"; has "$(<"$T/install.out")" "hermes-crew doctor"
+  eq "plugins enable hermes-crew" "$(<"$T/hermes.calls")"
+  for t in hermes-shared hermes-tmux hermes-crew hermes-team-lib hermes-team-spawn hermes-team-msg hermes-team-board; do [ -x "$HOME/.local/bin/$t" ] || die "$t not installed"; done
+  [ -f "$HOME/.hermes/plugins/hermes-crew/plugin.yaml" ] || die "plugin not installed"
+  [ -f "$HOME/.hermes/plugins/hermes-crew/hermes_crew/cli.py" ] || die "plugin package not installed"
+  [ -z "$(find "$HOME/.hermes/plugins" -name __pycache__)" ] || die "__pycache__ was copied"
+  for k in "$ROOT"/skill/*/; do [ -f "$HOME/.hermes/skills/autonomous-ai-agents/$(basename "$k")/SKILL.md" ] || die "skill $k not installed"; done
   has "$(<"$HOME/.config/hermes-team.conf")" "HERMES_TEAM_MODELS"
-  PATH=$T/extra:$PATH hermes-shared --probe; has "$(<"$FAKE_LOG")" "ARGS --probe"   # hermes-shared falls back to PATH
-  bash "$ROOT/install.sh" --uninstall >/dev/null 2>&1; [ ! -e "$HOME/.local/bin/hermes-team-lib" ] || die "lib survived uninstall"; }
+  # shellcheck disable=SC2016  # literal $HOME is what .bashrc must contain
+  has "$(<"$HOME/.bashrc")" 'export PATH="$HOME/.local/bin:$PATH"'
+  ver=$("$HOME/.local/bin/hermes-crew" --version) || die "installed hermes-crew does not run"; has "$ver" "3."
+  bash "$ROOT/install.sh" >/dev/null 2>&1 </dev/null || die "re-install failed"       # idempotent
+  [ "$(grep -c 'hermes-tmux-team' "$HOME/.bashrc")" -le 2 ] || die ".bashrc grew on re-install: $(<"$HOME/.bashrc")"
+  bash "$ROOT/install.sh" --uninstall >"$T/uninstall.out" 2>&1 </dev/null || die "uninstall failed: $(<"$T/uninstall.out")"
+  has "$(<"$T/hermes.calls")" "plugins disable hermes-crew"
+  eq "" "$(find "$HOME" -type f ! -path "$HOME/.bashrc" | sort)" "files left behind"
+  eq "$(<"$T/bashrc.orig")" "$(<"$HOME/.bashrc")" ".bashrc not restored"; }
+
+test_install_falls_back_when_enable_fails() {
+  rm -rf "$HOME"; mkdir -p "$HOME" "$T/extra"; printf '#!/usr/bin/env bash\nexit 1\n' > "$T/extra/hermes"; chmod +x "$T/extra/hermes"
+  export PATH=$T/extra:/usr/local/bin:/usr/bin:/bin
+  bash "$ROOT/install.sh" >"$T/install.out" 2>&1 </dev/null || die "install must not fail when 'plugins enable' fails"
+  has "$(<"$T/install.out")" "run: hermes plugins enable hermes-crew"; }
+
+test_hermes_shared_falls_back_to_path_hermes() {
+  rm -f "$HOME/.local/bin/hermes"; mkdir -p "$T/extra"; ln -s "$ROOT/tests/fake-hermes" "$T/extra/hermes"
+  PATH=$T/extra:$PATH hermes-shared --probe; has "$(<"$FAKE_LOG")" "ARGS --probe"
+  HERMES_TEAM_HERMES=$T/extra/hermes hermes-shared --probe2; has "$(<"$FAKE_LOG")" "ARGS --probe2"; }
+
+# ======================= shared-config heal =======================
+heal_env() {  # a "Windows" dir plus a conf that points hermes-shared at it
+  WINH=$T/win; mkdir -p "$WINH" "$HOME/.hermes"; echo "WIN_HOME=$WINH" > "$HOME/.config/hermes-team.conf"; }
+
+test_heal_pushes_newer_wsl_copy_back() {
+  heal_env; echo old > "$WINH/config.yaml"; touch -d '2024-01-01' "$WINH/config.yaml"; echo new > "$HOME/.hermes/config.yaml"
+  hermes-shared --x; [ -L "$HOME/.hermes/config.yaml" ] || die "link not restored"
+  eq new "$(<"$WINH/config.yaml")"; eq old "$(cat "$WINH"/config.yaml.bak-wsl-*)" "Windows copy backup"; }
+
+test_heal_backs_up_wsl_copy_when_windows_is_newer() {
+  heal_env; echo wsl > "$HOME/.hermes/.env"; touch -d '2024-01-01' "$HOME/.hermes/.env"; echo win > "$WINH/.env"
+  hermes-shared --x; [ -L "$HOME/.hermes/.env" ] || die "link not restored"
+  eq win "$(<"$WINH/.env")"; eq wsl "$(cat "$HOME"/.hermes/.env.bak-wsl-*)" "WSL copy must be backed up before it is removed"; }
+
+test_heal_keeps_only_five_backups() {
+  heal_env; echo old > "$WINH/.env"; touch -d '2024-01-01' "$WINH/.env"
+  for d in 1 2 3 4 5 6 7; do echo "b$d" > "$WINH/.env.bak-wsl-2020010$d-000000"; touch -d "2020-01-0$d" "$WINH/.env.bak-wsl-2020010$d-000000"; done
+  echo new > "$HOME/.hermes/.env"; hermes-shared --x
+  set -- "$WINH"/.env.bak-wsl-*; eq 5 "$#" "backups kept"; [ -f "$WINH/.env.bak-wsl-20200101-000000" ] && die "oldest backup survived"; true; }
 
 # ======================= runner =======================
 ALL=$(declare -F | awk '{print $3}' | grep '^test_'); SEL=${*:-$ALL}; pass=0; fail=0; idx=0; failed=""

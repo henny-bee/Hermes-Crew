@@ -17,3 +17,16 @@ jobs:
         run: shellcheck -x bin/hermes-shared bin/hermes-tmux bin/hermes-team-* install.sh tests/run.sh tests/fake-hermes
       - name: Tests
         run: bash tests/run.sh
+  pytest:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install pytest
+      - run: pytest tests/py -q

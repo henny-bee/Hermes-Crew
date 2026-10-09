@@ -2,25 +2,37 @@
 # Run Hermes. If install.sh was run with --share-windows-config, first heal the links to the
 # Windows Hermes settings: Hermes saves config.yaml/.env/auth.json atomically (new file +
 # rename), which replaces a symlink with a plain file. A newer WSL copy is pushed back to
-# Windows (old one kept as *.bak-wsl-<time>), then the link is restored.
+# Windows (old one kept as *.bak-wsl-<time>), a newer Windows copy keeps the WSL one as
+# *.bak-wsl-<time>; then the link is restored. Only the newest 5 backups per file are kept.
 export PATH="$HOME/.local/bin:$PATH"
 CONF="$HOME/.config/hermes-team.conf"
 # shellcheck disable=SC1090  # user config, not part of the repo
 [ -f "$CONF" ] && . "$CONF"
 
-if [ -n "${WIN_HOME:-}" ] && [ -d "$WIN_HOME" ]; then
-  H="${HERMES_HOME:-$HOME/.hermes}"
+prune() {  # keep only the newest 5 *.bak-wsl-* of file $1
+  # shellcheck disable=SC2012  # sorted by mtime; the names are ours (timestamps)
+  ls -1t "$1".bak-wsl-* 2>/dev/null | tail -n +6 | while read -r old; do rm -f "$old"; done; }
+
+heal() {
+  local H="${HERMES_HOME:-$HOME/.hermes}" f ts; ts=$(date +%Y%m%d-%H%M%S)
   for f in config.yaml .env auth.json SOUL.md; do
     [ -e "$WIN_HOME/$f" ] || continue
     if [ -f "$H/$f" ] && [ ! -L "$H/$f" ]; then
       if [ "$H/$f" -nt "$WIN_HOME/$f" ]; then
-        cp -p "$WIN_HOME/$f" "$WIN_HOME/$f.bak-wsl-$(date +%Y%m%d-%H%M%S)"
+        cp -p "$WIN_HOME/$f" "$WIN_HOME/$f.bak-wsl-$ts"
         cp "$H/$f" "$WIN_HOME/$f"
+      else
+        cp -p "$H/$f" "$H/$f.bak-wsl-$ts"        # Windows is newer: keep the WSL copy before it is replaced by the link
       fi
       rm -f "$H/$f"
     fi
     [ -L "$H/$f" ] || ln -s "$WIN_HOME/$f" "$H/$f"
-  done
+    prune "$WIN_HOME/$f"; prune "$H/$f"
+  done; }
+
+if [ -n "${WIN_HOME:-}" ] && [ -d "$WIN_HOME" ]; then
+  mkdir -p "${HERMES_HOME:-$HOME/.hermes}"
+  ( flock 8; heal ) 8>"${HERMES_HOME:-$HOME/.hermes}/.share.lock"   # two Hermes starting at once must not race the heal
 fi
 HB="${HERMES_TEAM_HERMES:-$HOME/.local/bin/hermes}"        # install.sh may have found hermes elsewhere
 [ -x "$HB" ] || HB=$(command -v hermes) || { echo "hermes not found (run install.sh)" >&2; exit 1; }

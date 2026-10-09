@@ -3,6 +3,8 @@
 # idle (empty prompt), so it never interrupts a running turn or a half-typed input. Returns
 # immediately. Every message is logged to <team dir>/.team/messages.log; if it cannot be
 # delivered within HERMES_TEAM_MSG_TIMEOUT seconds (default 3600) the sender is told.
+# If the target runs the hermes-crew plugin (agents/<Role>.json with a live pid) the message goes to
+# its mailbox via `hermes-crew send` and the plugin delivers it; otherwise it is typed as above.
 # usage: hermes-team-msg <role|%pane-id> <message...>
 #        hermes-team-msg --list
 # shellcheck source=/dev/null  # hermes-team-lib, next to this script
@@ -16,12 +18,20 @@ if [ "$1" = "--list" ]; then panes | awk '{printf "%s %s\n", $1, ($2==""?"(no ro
 
 T=$1; shift
 case "$T" in %*) TARGET=$T ;; *) TARGET=$(panes | awk -v r="$T" 'tolower($2)==tolower(r){print $1; exit}') ;; esac
-{ [ -n "$TARGET" ] && tmux display -p -t "$TARGET" '#{pane_id}' >/dev/null 2>&1; } || { echo "no pane with role '$T'. Team: $(panes | awk '{print $2}' | xargs)" >&2; exit 1; }
+{ [ -n "$TARGET" ] && pane_exists "$TARGET"; } || { echo "no pane with role '$T'. Team: $(panes | awk '{print $2}' | xargs)" >&2; exit 1; }
 FROM=$( [ -n "$ME" ] && tmux display -p -t "$ME" '#{@role}' ); FROM=${FROM:-user}
 BODY=$(tr '\n' ' ' <<<"$*")                                    # one line: a newline would act as Enter
 if [ -n "$HERMES_TEAM_RAW" ]; then MSG=$BODY; else MSG="[from $FROM sent $(date +%H:%M:%S)] $BODY"; fi
 
 TDIR=$(team_dir_of "$TARGET"); [ -n "$TDIR" ] || TDIR=$(team_dir_of "${ME:-$TARGET}")
+# v3: target has a live plugin -> mailbox (the plugin injects the message when its agent is idle)
+crew="$(dirname "$(readlink -f "$0")")/hermes-crew"
+TROLE=$(tmux display -p -t "$TARGET" '#{@role}')
+AF="$TDIR/.team/agents/$TROLE.json"
+if [ -x "$crew" ] && [ -n "$TDIR" ] && [ -n "$TROLE" ] && [ -f "$AF" ]; then
+  apid=$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$AF" | head -1); ast=$(sed -n 's/.*"state": *"\([a-z]*\)".*/\1/p' "$AF" | head -1)
+  if [ "$ast" != exited ] && [ -n "$apid" ] && kill -0 "$apid" 2>/dev/null; then exec env HERMES_TEAM_DIR="$TDIR" "$crew" send "$TROLE" "$@"; fi
+fi
 if [ -n "$TDIR" ]; then ensure_team "$TDIR"; mkdir -p "$TDIR/.team/locks"; LOCK="$TDIR/.team/locks/${TARGET#%}.lock"; MLOG="$TDIR/.team/messages.log"
 else  # no team dir known: per-user, per-tmux-server lock (pane ids repeat across servers)
   RD="${XDG_RUNTIME_DIR:-/tmp}/hermes-team-$UID"; mkdir -p "$RD"; chmod 700 "$RD"
@@ -34,7 +44,7 @@ mlog queued
   exec 9>"$LOCK"; flock 9                                      # one delivery at a time per pane
   end=$((SECONDS + ${HERMES_TEAM_MSG_TIMEOUT:-3600}))
   while [ $SECONDS -lt "$end" ]; do
-    tmux display -p -t "$TARGET" '#{pane_id}' >/dev/null 2>&1 || break    # pane is gone
+    pane_exists "$TARGET" || break    # pane is gone
     if pane_idle "$TARGET"; then
       tmux send-keys -t "$TARGET" -l "$MSG"; sleep 0.4; tmux send-keys -t "$TARGET" Enter; mlog delivered
       sleep 0.5; for _ in $(seq 40); do pane_idle "$TARGET" || break; sleep 0.25; done   # hold the lock until Hermes reacts
@@ -43,7 +53,7 @@ mlog queued
     sleep "${HERMES_TEAM_MSG_POLL:-2}"
   done
   mlog expired
-  if [ -n "$ME" ] && [ -z "$HERMES_TEAM_RAW" ] && tmux display -p -t "$ME" '#{pane_id}' >/dev/null 2>&1; then
+  if [ -n "$ME" ] && [ -z "$HERMES_TEAM_RAW" ] && pane_exists "$ME"; then
     HERMES_TEAM_RAW=1 "$0" "$ME" "[hermes-team] message to $T expired undelivered: ${BODY:0:80}"
   fi
 ) >/dev/null 2>&1 &

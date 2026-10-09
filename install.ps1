@@ -30,8 +30,13 @@ $distroArg = if ($Distro) { "-d $Distro " } else { '' }
 New-Item -ItemType Directory -Force $binDir | Out-Null
 Set-Content -Path $cmd -Encoding ascii -Value @(
     '@echo off'
+    'setlocal'
     'rem Open Hermes in WSL (inside tmux, as team "lead") in the current folder. Extra args go to hermes.'
-    "wsl.exe $distroArg--cd `"%CD%`" -e $wslHome/.local/bin/hermes-tmux %*"
+    'rem The folder is quoted, so & and ^ in its name are safe. At a drive root %CD% ends in a backslash that would'
+    'rem escape the closing quote, hence the added dot (C:\.). Not handled: a folder name containing % or ! or ".'
+    'set "D=%CD%"'
+    'if "%D:~-1%"=="\" set "D=%D%."'
+    "wsl.exe $distroArg--cd `"%D%`" -e $wslHome/.local/bin/hermes-tmux %*"
 )
 Write-Host "Created $cmd"
 

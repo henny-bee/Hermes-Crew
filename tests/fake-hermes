@@ -2,7 +2,8 @@
 # Stand-in for Hermes' classic REPL, used by tests/run.sh inside isolated tmux panes.
 # Draws a prompt on the bottom row with the cursor right behind it and logs every input line.
 # env:
-#   FAKE_LOG          file to append "<epoch.ms> <pane> <KIND> <text>" lines (KIND: ARGS, LINE, BUSYLINE)
+#   FAKE_LOG          file to append "<epoch.ms> <pane> <KIND> <text>" lines (KIND: ARGS, ENV, QUERY, LINE, BUSYLINE)
+#                     QUERY = content of --query-file (the first input of `hermes chat --query-file`); "/exit" ends the REPL
 #   FAKE_PROFILE      prompt prefix, e.g. "coder"          FAKE_SYMBOL   prompt symbol (default ❯)
 #   FAKE_BUSY         seconds the REPL stays busy after each received line
 #   FAKE_BUSY_TEXT    busy placeholder (default: English Hermes text)
@@ -11,6 +12,10 @@
 #   FAKE_PROMPT_ROW   screen row of the bottom separator (default: last row); prompt is one row above
 log() { printf '%s %s %s %s\n' "$(date +%s.%N)" "${TMUX_PANE:-?}" "$1" "$2" >> "${FAKE_LOG:-/dev/null}"; }
 log ARGS "$*"
+log ENV "dir=${HERMES_TEAM_DIR:-} role=${HERMES_TEAM_ROLE:-} session=${HERMES_CREW_SESSION:-}"
+# `chat --cli -s skill --continue name --query-file F`: F is the first input of the session
+qf=""; prev=""; for a in "$@"; do [ "$prev" = --query-file ] && qf=$a; prev=$a; done
+if [ -n "$qf" ] && [ -f "$qf" ]; then q=$(<"$qf"); log QUERY "${q//$'\n'/ ⏎ }"; fi
 SYM=${FAKE_SYMBOL:-❯}; P="${FAKE_PROFILE:+$FAKE_PROFILE }$SYM "
 BUSY_TEXT=${FAKE_BUSY_TEXT:-"msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel"}
 ROWS=$(tput lines 2>/dev/null || echo 40); ROW=${FAKE_PROMPT_ROW:-$ROWS}   # row of the bottom separator
@@ -33,13 +38,13 @@ if [ -n "$FAKE_MENU" ]; then
   printf '\033[%d;1H\033[2K  Allow for this session' $((ROW - 1))
   printf '\033[%d;1H\033[2K  Deny' "$ROW"
   printf '\033[%d;3H' $((ROW - 2))        # cursor parked right behind the menu marker
-  while IFS= read -r l; do log LINE "$l"; done
+  while IFS= read -r l; do log LINE "$l"; [ "$l" = /exit ] && exit 0; done
   exit 0
 fi
 while true; do
   prompt "" "${FAKE_PLACEHOLDER-Turn these notes into a to-do list}"
   IFS= read -r l || exit 0
-  log LINE "$l"
+  log LINE "$l"; [ "$l" = /exit ] && exit 0
   [ -n "$FAKE_BUSY" ] || continue
   end=$(( ${EPOCHREALTIME/./} + FAKE_BUSY * 1000000 ))
   while [ "${EPOCHREALTIME/./}" -lt "$end" ]; do
