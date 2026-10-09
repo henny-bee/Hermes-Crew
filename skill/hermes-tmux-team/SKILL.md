@@ -27,6 +27,7 @@ any particular roles. What it adds is structure that keeps any team honest:
 |---|---|
 | Shared decisions (names, interfaces, formats, numbers) | `hermes-team-board decide "..."` / `decide --replaces <#> "..."` |
 | One owner per file; others request changes from the owner | `hermes-team-board own <file>` |
+| Hand a file over / give it up (owner or lead) | `hermes-team-board transfer <file> <Role>` / `release <file>` |
 | Approvals bound to file content (expire when the file changes) | `hermes-team-board approve <file> "<what was checked>"` |
 | Ground truth for you | `hermes-team-board status` |
 | Messages (queued until the receiver is idle, timestamped) | `hermes-team-msg <Role> "..."` |

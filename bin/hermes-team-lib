@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Shared helpers, sourced by hermes-team-{spawn,msg,board}. Not meant to be run.
+my_pane() {  # the tmux pane whose process is an ancestor of this script
+  local p=$$ id map; map=$(tmux list-panes -a -F '#{pane_pid} #{pane_id}' 2>/dev/null) || return 1
+  while [ "${p:-1}" -gt 1 ]; do
+    id=$(awk -v p="$p" '$1==p{print $2}' <<<"$map"); [ -n "$id" ] && { echo "$id"; return; }
+    p=$(ps -o ppid= -p "$p" | tr -d ' ')
+  done; return 1; }
+
+team_dir_of() { tmux show -wv -t "$1" @team_dir 2>/dev/null; }  # team dir of the window holding pane/window $1
+
+ensure_team() {  # create <dir>/.team; its own .gitignore keeps team state out of the user's repo
+  mkdir -p "$1/.team"; [ -e "$1/.team/.gitignore" ] || echo '*' > "$1/.team/.gitignore"; }
+
+# 0 iff the Hermes classic REPL in pane $1 sits at an EMPTY prompt: not busy, no menu, nothing typed.
+# Looks only at the cursor line. Prompt = [<profile> ]<symbol><space>; a skin may change the symbol
+# (HERMES_TEAM_PROMPT_SYMBOL). Placeholder text is drawn AFTER the cursor, so "empty input" means
+# the cursor sits right behind the prompt. Busy placeholders contain "/steer" in every locale.
+pane_idle() {
+  local t=$1 sym=${HERMES_TEAM_PROMPT_SYMBOL:-❯} x y mode line m LC_ALL=C.UTF-8
+  read -r y x mode < <(tmux display -p -t "$t" '#{cursor_y} #{cursor_x} #{pane_in_mode}' 2>/dev/null) || return 1
+  [ "$mode" = 0 ] || return 1                       # copy mode / pane gone
+  line=$(tmux capture-pane -p -t "$t" -S "$y" -E "$y" 2>/dev/null) || return 1
+  line+=" "                                         # capture trims trailing blanks
+  [[ $line =~ ^([A-Za-z0-9_.-]+\ )?"$sym"\  ]] || return 1
+  m=${BASH_REMATCH[0]}
+  [ "$x" = "${#m}" ] || return 1                    # something typed (or cursor elsewhere)
+  [[ $line == *"/steer"* || $line == *"Processing command"* ]] && return 1
+  [[ ${line:${#m}} =~ ^(\[[0-9]+\]|Allow|Deny) ]] && return 1   # approval / choice menu row
+  return 0; }

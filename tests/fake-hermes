@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Stand-in for Hermes' classic REPL, used by tests/run.sh inside isolated tmux panes.
+# Draws a prompt on the bottom row with the cursor right behind it and logs every input line.
+# env:
+#   FAKE_LOG          file to append "<epoch.ms> <pane> <KIND> <text>" lines (KIND: ARGS, LINE, BUSYLINE)
+#   FAKE_PROFILE      prompt prefix, e.g. "coder"          FAKE_SYMBOL   prompt symbol (default ❯)
+#   FAKE_BUSY         seconds the REPL stays busy after each received line
+#   FAKE_BUSY_TEXT    busy placeholder (default: English Hermes text)
+#   FAKE_PLACEHOLDER  dim idle placeholder drawn after the cursor (default: a suggestion like real Hermes; "" = none)
+#   FAKE_MENU=1       show an approval menu instead of the prompt: rows "❯ Allow once" ...
+#   FAKE_PROMPT_ROW   screen row of the bottom separator (default: last row); prompt is one row above
+log() { printf '%s %s %s %s\n' "$(date +%s.%N)" "${TMUX_PANE:-?}" "$1" "$2" >> "${FAKE_LOG:-/dev/null}"; }
+log ARGS "$*"
+SYM=${FAKE_SYMBOL:-❯}; P="${FAKE_PROFILE:+$FAKE_PROFILE }$SYM "
+BUSY_TEXT=${FAKE_BUSY_TEXT:-"msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel"}
+ROWS=$(tput lines 2>/dev/null || echo 40); ROW=${FAKE_PROMPT_ROW:-$ROWS}   # row of the bottom separator
+COLS=$(tput cols 2>/dev/null || echo 80)
+trap 'exit 0' TERM HUP
+
+prompt() {  # $1: icon shown before the prompt, $2: text drawn after the cursor (dim). Real layout:
+  # status bar / separator / prompt line / separator; ONE write so a capture never sees half a redraw.
+  local s sep; printf -v sep '%*s' "$COLS" ''; sep=${sep// /─}
+  printf -v s '\033[%d;1H\033[2K ☤ model │ ctx -- │ fake\033[%d;1H\033[2K%s\033[%d;1H\033[2K%s\033[%d;1H\033[2K%s%s' \
+    $((ROW - 3)) $((ROW - 2)) "$sep" "$ROW" "$sep" $((ROW - 1)) "$1" "$P"
+  [ -n "$2" ] && s+=$'\033'7$'\033[2m'$2$'\033[0m\033'8   # save cursor, dim text, restore cursor
+  printf '%s' "$s"; }
+
+printf '\033[2J'
+if [ -n "$FAKE_MENU" ]; then
+  printf '\033[%d;1H' $((ROW - 3))
+  printf 'Dangerous command: rm -rf build/\n'
+  printf '\033[%d;1H\033[2K❯ Allow once' $((ROW - 2))
+  printf '\033[%d;1H\033[2K  Allow for this session' $((ROW - 1))
+  printf '\033[%d;1H\033[2K  Deny' "$ROW"
+  printf '\033[%d;3H' $((ROW - 2))        # cursor parked right behind the menu marker
+  while IFS= read -r l; do log LINE "$l"; done
+  exit 0
+fi
+while true; do
+  prompt "" "${FAKE_PLACEHOLDER-Turn these notes into a to-do list}"
+  IFS= read -r l || exit 0
+  log LINE "$l"
+  [ -n "$FAKE_BUSY" ] || continue
+  end=$(( ${EPOCHREALTIME/./} + FAKE_BUSY * 1000000 ))
+  while [ "${EPOCHREALTIME/./}" -lt "$end" ]; do
+    prompt "☤ " "$BUSY_TEXT"          # busy: agent icon before the symbol
+    if IFS= read -r -t 0.3 l2; then log BUSYLINE "$l2"; fi
+  done
+done

@@ -4,72 +4,113 @@
 # usage:
 #   hermes-team-board decide [--replaces <#>] "<decision>"   record (or replace) a shared decision
 #   hermes-team-board own <file>...                         claim files you author
+#   hermes-team-board transfer <file> <Role>                hand a file to another role (owner or lead)
+#   hermes-team-board release <file>                        give up ownership (owner or lead)
 #   hermes-team-board approve <file> "<what you checked>"   approve the CURRENT content of a file
 #   hermes-team-board status                                team, owners, decisions, approvals
 # An approval stores the file's sha256; if the file changes later the approval shows STALE.
-my_pane() {  # the tmux pane whose process is an ancestor of this script
-  local p=$$ id map; map=$(tmux list-panes -a -F '#{pane_pid} #{pane_id}' 2>/dev/null) || return 1
-  while [ "${p:-1}" -gt 1 ]; do
-    id=$(awk -v p="$p" '$1==p{print $2}' <<<"$map"); [ -n "$id" ] && { echo "$id"; return; }
-    p=$(ps -o ppid= -p "$p" | tr -d ' ')
-  done; return 1; }
+# shellcheck source=/dev/null  # hermes-team-lib, next to this script
+. "$(dirname "$(readlink -f "$0")")/hermes-team-lib"
 
 ME=$(my_pane); ROLE=${ME:+$(tmux display -p -t "$ME" '#{@role}')}; ROLE=${ROLE:-user}
 WIN=${ME:+$(tmux display -p -t "$ME" '#{session_name}:#{window_index}')}
-DIR=${WIN:+$(tmux show -wv -t "$WIN" @team_dir 2>/dev/null)}; DIR=${DIR:-$PWD}
-LOG="$DIR/.team/board.log"; mkdir -p "$DIR/.team"
+DIR=${WIN:+$(team_dir_of "$WIN")}; DIR=${DIR:-$PWD}
+LOG="$DIR/.team/board.log"
+[ "$1" = status ] || ensure_team "$DIR"
 rel() { realpath -m --relative-to="$DIR" "$1"; }
-clean() { tr '\t\n' '  ' <<<"$*"; }
-append() { ( flock 9; printf '%s\t%s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$ROLE" "$*" >> "$LOG" ) 9>"$LOG.lock"; }
-owner_of() { awk -F'\t' -v f="$1" '$3=="OWN" && $4==f {o=$2} END{print o}' "$LOG" 2>/dev/null; }
+clean() { local s="$*"; s=${s//$'\t'/ }; printf '%s' "${s//$'\n'/ }"; }   # tabs/newlines would break the log format
+usage() { sed -n '4,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+# Runs "$@" holding the board lock: every check-then-append happens inside one of these.
+locked() { ( flock 9; "$@" ) 9>"$LOG.lock"; }
+put() { printf '%s\t%s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$ROLE" "$*" >> "$LOG"; }  # lock must be held
+# current owner per file: OWN claims, TRANSFER hands over, RELEASE frees
+# shellcheck disable=SC2016  # awk program: $N are awk fields, not shell variables
+AWK_OWN='$3=="OWN"{o[$4]=$2} $3=="TRANSFER"{o[$4]=$5} $3=="RELEASE"{delete o[$4]}'
+owner_of() { awk -F'\t' -v f="$1" "$AWK_OWN END{print o[f]}" "$LOG" 2>/dev/null; }
+is_lead() { [ "$ROLE" = lead ] || [ "$ROLE" = user ]; }   # "user" = a human at a plain shell
+
+do_decide() {
+  local n gone
+  read -r n gone < <(awk -F'\t' -v r="$rep" '$3=="DECIDE"{n++; if($5!="")g[$5]=n} END{print n+1, (r in g)?g[r]:0}' "$LOG" 2>/dev/null || echo "1 0")
+  if [ -n "$rep" ]; then
+    [[ $rep =~ ^[0-9]+$ ]] && [ "$rep" -ge 1 ] && [ "$rep" -lt "$n" ] || { echo "REFUSED: --replaces $rep: no such decision (existing: 1..$((n-1)))" >&2; return 1; }
+    [ "$gone" = 0 ] || { echo "REFUSED: decision #$rep was already replaced by #$gone" >&2; return 1; }
+  fi
+  put "DECIDE	$(clean "$*")	$rep"; echo "decision #$n recorded${rep:+ (replaces #$rep)}"; }
+
+do_own() {
+  local f r o
+  for f in "$@"; do r=$(rel "$f"); o=$(owner_of "$r")
+    [ -z "$o" ] || [ "$o" = "$ROLE" ] || { echo "REFUSED: $r is owned by $o - ask $o (or lead) to run: hermes-team-board transfer $r <Role>" >&2; return 1; }
+  done
+  for f in "$@"; do r=$(rel "$f"); put "OWN	$r"; echo "$ROLE owns $r"; done; }
+
+do_transfer() {  # <file> <Role>
+  local r o; r=$(rel "$1"); o=$(owner_of "$r")
+  [ -n "$o" ] || { echo "REFUSED: $r has no owner - claim it with: hermes-team-board own $r" >&2; return 1; }
+  [ "$o" = "$ROLE" ] || is_lead || { echo "REFUSED: $r is owned by $o - only $o or lead can transfer it" >&2; return 1; }
+  put "TRANSFER	$r	$2"; echo "$r: $o -> $2"; }
+
+do_release() {
+  local r o; r=$(rel "$1"); o=$(owner_of "$r")
+  [ -n "$o" ] || { echo "$r has no owner"; return 0; }
+  [ "$o" = "$ROLE" ] || is_lead || { echo "REFUSED: $r is owned by $o - only $o or lead can release it" >&2; return 1; }
+  put "RELEASE	$r"; echo "$r released (was $o)"; }
+
+do_approve() {  # <rel file> <hash> <evidence>
+  local o; o=$(owner_of "$1")
+  [ "$o" = "$ROLE" ] && { echo "REFUSED: you own $1 - an approval must come from someone else" >&2; return 1; }
+  put "APPROVE	$1	$2	$3"; echo "approved $1 @ $2"; }
+
+status() {
+  echo "== team ($DIR) =="
+  if [ -n "$WIN" ]; then
+    tmux list-panes -t "$WIN" -F '#{pane_id} #{@role} #{@model}' | while read -r id r m; do
+      st=busy; pane_idle "$id" && st=idle
+      printf '  %-18s %-5s model=%s\n' "${r:-?}" "$st" "${m:-default}"
+    done
+  fi
+  [ -f "$LOG" ] || { echo "(board is empty)"; return 0; }
+  echo "== decisions (current; replaced ones hidden) =="
+  awk -F'\t' '$3=="DECIDE"{n++; t[n]=substr($1,12); w[n]=$2; d[n]=$4; if($5!="") gone[$5]=n}
+    END{for(i=1;i<=n;i++) if(!(i in gone)) printf "  #%d [%s %s] %s\n", i, t[i], w[i], d[i]}' "$LOG"
+  echo "== files =="
+  # every file ever owned or approved, with its current owner (empty = nobody)
+  awk -F'\t' "$AWK_OWN"' $3~/^(OWN|TRANSFER|RELEASE)$/{s[$4]} $3=="APPROVE"{s[$4]}
+    END{for(f in s) print f"\t"o[f]}' "$LOG" | sort | while IFS=$'\t' read -r f o; do
+    cur=$( [ -f "$DIR/$f" ] && sha256sum "$DIR/$f" | cut -c1-12 || echo missing )
+    printf '  %-40s owner=%s\n' "$f" "${o:-(none)}"
+    ok=0
+    while IFS=$'\t' read -r ar ah aev; do
+      if [ "$ar" = "$o" ]; then s="ignored (approver owns the file now)"
+      elif [ "$ah" = "$cur" ]; then s=OK; ok=1; else s="STALE (file changed after approval)"; fi
+      printf '      approved by %-14s %s - %s\n' "$ar" "$s" "${aev:0:90}"
+    done < <(awk -F'\t' -v f="$f" '$3=="APPROVE" && $4==f{a[$2]=$5; e[$2]=$6} END{for(r in a) print r"\t"a[r]"\t"e[r]}' "$LOG")
+    [ -n "$o" ] || echo "      !! no owner"
+    [ $ok = 1 ] || echo "      !! no valid approval from a non-owner"
+  done; }
 
 case "$1" in
   decide)
-    shift; rep=""; [ "$1" = "--replaces" ] && { rep=$2; shift 2; }
-    [ -n "$*" ] || { echo "usage: hermes-team-board decide [--replaces <#>] \"<decision>\"" >&2; exit 2; }
-    n=$(( $(grep -c '	DECIDE	' "$LOG" 2>/dev/null || echo 0) + 1 ))
-    append "DECIDE	$(clean "$*")	${rep#\#}"; echo "decision #$n recorded${rep:+ (replaces #${rep#\#})}" ;;
+    shift; rep=""
+    if [ "$1" = "--replaces" ]; then rep=${2#\#}; shift 2 || usage; fi
+    [[ $rep =~ ^[0-9]+$ ]] && rep=$((10#$rep))
+    [ -n "$*" ] || usage
+    locked do_decide "$@" ;;
   own)
-    shift; [ $# -ge 1 ] || { echo "usage: hermes-team-board own <file>..." >&2; exit 2; }
-    for f in "$@"; do
-      r=$(rel "$f"); o=$(owner_of "$r")
-      if [ -n "$o" ] && [ "$o" != "$ROLE" ]; then echo "REFUSED: $r is owned by $o - ask $o (or lead) to transfer it" >&2; exit 1; fi
-      append "OWN	$r"; echo "$ROLE owns $r"
-    done ;;
+    shift; [ $# -ge 1 ] || usage
+    locked do_own "$@" ;;
+  transfer)
+    [[ $2 && $3 =~ ^[A-Za-z0-9_]+$ ]] || usage
+    locked do_transfer "$2" "$3" ;;
+  release)
+    [ -n "$2" ] || usage
+    locked do_release "$2" ;;
   approve)
     shift; f=$1; shift; ev=$(clean "$*")
     [ -f "$f" ] || { echo "usage: hermes-team-board approve <existing file> \"<what you checked>\"" >&2; exit 2; }
     [ ${#ev} -ge 20 ] || { echo "REFUSED: describe what you actually checked (at least a sentence)" >&2; exit 1; }
-    r=$(rel "$f"); o=$(owner_of "$r")
-    [ "$o" = "$ROLE" ] && { echo "REFUSED: you own $r - an approval must come from someone else" >&2; exit 1; }
-    h=$(sha256sum "$f" | cut -c1-12)
-    append "APPROVE	$r	$h	$ev"; echo "approved $r @ $h" ;;
-  status)
-    echo "== team ($DIR) =="
-    if [ -n "$WIN" ]; then
-      tmux list-panes -t "$WIN" -F '#{pane_id} #{@role} #{@model}' | while read -r id r m; do
-        line=$(tmux capture-pane -p -t "$id" | grep '❯' | tail -1)
-        st=busy; [[ "$line" == "❯ "* && "$line" != *"msg=interrupt"* ]] && st=idle
-        printf '  %-18s %-5s model=%s\n' "${r:-?}" "$st" "${m:-default}"
-      done
-    fi
-    [ -f "$LOG" ] || { echo "(board is empty)"; exit 0; }
-    echo "== decisions (current; replaced ones hidden) =="
-    awk -F'\t' '$3=="DECIDE"{n++; t[n]=substr($1,12); w[n]=$2; d[n]=$4; if($5!="") gone[$5]=n}
-      END{for(i=1;i<=n;i++) if(!(i in gone)) printf "  #%d [%s %s] %s\n", i, t[i], w[i], d[i]}' "$LOG"
-    echo "== files =="
-    awk -F'\t' '$3=="OWN"{o[$4]=$2} $3=="APPROVE"{a[$4","$2]=$5; ev[$4","$2]=$6; who[$4]=who[$4]" "$2} END{for(f in o) print f"\t"o[f]; for(k in a){split(k,x,","); print "A\t"x[1]"\t"x[2]"\t"a[k]"\t"ev[k]}}' "$LOG" > "$LOG.view"
-    awk -F'\t' '$1!="A"' "$LOG.view" | sort | while IFS=$'\t' read -r f o; do
-      cur=$( [ -f "$DIR/$f" ] && sha256sum "$DIR/$f" | cut -c1-12 || echo missing )
-      printf '  %-40s owner=%-16s\n' "$f" "$o"
-      ok=0
-      while IFS=$'\t' read -r _ af ar ah aev; do
-        [ "$af" = "$f" ] || continue
-        if [ "$ah" = "$cur" ]; then s=OK; ok=1; else s="STALE (file changed after approval)"; fi
-        printf '      approved by %-14s %s - %s\n' "$ar" "$s" "${aev:0:90}"
-      done < <(awk -F'\t' '$1=="A"' "$LOG.view")
-      [ $ok = 1 ] || echo "      !! no valid approval from a non-owner"
-    done
-    rm -f "$LOG.view" ;;
-  *) sed -n '2,9p' "$0"; exit 2 ;;
+    locked do_approve "$(rel "$f")" "$(sha256sum "$f" | cut -c1-12)" "$ev" ;;
+  status) status ;;
+  *) usage ;;
 esac

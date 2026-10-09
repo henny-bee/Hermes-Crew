@@ -4,15 +4,22 @@
 # usage: hermes-tmux [hermes args...]
 export PATH="$HOME/.local/bin:$PATH"
 command -v tmux >/dev/null || { echo "tmux is not installed (sudo apt install tmux)" >&2; exit 1; }
-[ -n "$TMUX" ] && exec hermes-shared "$@"
+# --cli: the classic REPL is what hermes-team-msg can type into (config may default to the TUI)
+if [ -n "$TMUX" ]; then   # already inside tmux: same setup, in the current pane
+  [ -n "$(tmux display -p -t "$TMUX_PANE" '#{@role}')" ] || tmux set -p -t "$TMUX_PANE" @role lead
+  [ -n "$(tmux show -wv -t "$TMUX_PANE" @team_dir 2>/dev/null)" ] || tmux set -w -t "$TMUX_PANE" @team_dir "$PWD"
+  exec hermes-shared --cli -s hermes-tmux-team "$@"
+fi
 
-NAME="hermes-$(basename "$PWD" | tr -c 'A-Za-z0-9_\n-' '_')"
+# <folder>-<hash of full path>: two folders with the same name must not share a session
+NAME="hermes-$(basename "$PWD" | tr -c 'A-Za-z0-9_\n-' '_')-$(printf %s "$PWD" | sha1sum | cut -c1-6)"
 if ! tmux has-session -t "$NAME" 2>/dev/null; then
   tmux new-session -d -s "$NAME" -c "$PWD" -x "$(tput cols 2>/dev/null || echo 200)" -y "$(tput lines 2>/dev/null || echo 50)" \
-    "hermes-shared -s hermes-tmux-team${*:+ $(printf '%q ' "$@")}"   # preload the team skill for the lead
+    "hermes-shared --cli -s hermes-tmux-team${*:+ $(printf '%q ' "$@")}"   # preload the team skill for the lead
   tmux set -t "$NAME" mouse on                       # click a pane to talk to that agent
   tmux set -w -t "$NAME" pane-border-status top
   tmux set -w -t "$NAME" pane-border-format ' #{?@role,#{@role},#{pane_index}} '
+  tmux set -w -t "$NAME" @team_dir "$PWD"
   tmux set -p -t "$NAME" @role lead
 fi
 exec tmux attach -t "$NAME"

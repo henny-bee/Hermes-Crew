@@ -9,7 +9,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 BIN="$HOME/.local/bin"
 CONF="$HOME/.config/hermes-team.conf"
 HH="${HERMES_HOME:-$HOME/.hermes}"
-TOOLS="hermes-shared hermes-tmux hermes-team-spawn hermes-team-msg hermes-team-board"
+TOOLS="hermes-shared hermes-tmux hermes-team-lib hermes-team-spawn hermes-team-msg hermes-team-board"
 MARK="# hermes-tmux-team"
 SHARE=0; UNINSTALL=0; MODELS=""
 set_conf() {  # set KEY=VALUE in $CONF, keeping other keys
@@ -17,7 +17,8 @@ set_conf() {  # set KEY=VALUE in $CONF, keeping other keys
   grep -v "^$1=" "$CONF" > "$CONF.tmp" || true
   printf '%s=%q\n' "$1" "$2" >> "$CONF.tmp"; mv "$CONF.tmp" "$CONF"; }
 while [ $# -gt 0 ]; do a=$1; shift; case "$a" in
-  --models) MODELS=${1:-}; shift ;;
+  --models) { [ $# -ge 1 ] && [ -n "$1" ] && [ "${1#-}" = "$1" ]; } || { echo "--models needs a value, e.g. --models \"model-a model-b\"" >&2; exit 2; }
+            MODELS=$1; shift ;;
   --share-windows-config) SHARE=1 ;;
   --uninstall) UNINSTALL=1 ;;
   -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
@@ -41,19 +42,25 @@ if ! command -v tmux >/dev/null || ! command -v flock >/dev/null; then
   sudo apt-get update -qq && sudo apt-get install -y -qq tmux util-linux
 fi
 
+tv=$(tmux -V | grep -o '[0-9][0-9]*\.[0-9]*' | head -1 || true)   # empty for a git build: accept
+[ -z "$tv" ] || [ "${tv%%.*}" -ge 3 ] || die "tmux >= 3.0 is required (found $(tmux -V)); upgrade it, e.g. sudo apt install tmux"
+
 # 2) Hermes Agent (native Linux install). A wrapper that just calls the Windows hermes.exe
 #    cannot split tmux panes, so it is moved aside.
 if [ -f "$BIN/hermes" ] && grep -q 'hermes.exe' "$BIN/hermes" 2>/dev/null; then
   say "Moving old Windows-exe wrapper aside: $BIN/hermes.win-wrapper.bak"
   mv "$BIN/hermes" "$BIN/hermes.win-wrapper.bak"
 fi
-if [ ! -x "$BIN/hermes" ]; then
+if [ ! -x "$BIN/hermes" ] && FOUND=$(command -v hermes); then
+  say "Using Hermes found at $FOUND"
+elif [ ! -x "$BIN/hermes" ]; then
   say "Installing Hermes Agent (official installer)"
-  curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/hermes-install.sh
-  if [ "$SHARE" = 1 ]; then bash /tmp/hermes-install.sh --non-interactive   # settings come from Windows
-  else bash /tmp/hermes-install.sh; fi                                         # runs setup (model, keys)
+  INST=$(mktemp); trap 'rm -f "$INST"' EXIT
+  curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o "$INST"
+  if [ "$SHARE" = 1 ]; then bash "$INST" --non-interactive   # settings come from Windows
+  else bash "$INST"; fi                                       # runs setup (model, keys)
 fi
-[ -x "$BIN/hermes" ] || die "Hermes install failed (expected $BIN/hermes)"
+command -v hermes >/dev/null || [ -x "$BIN/hermes" ] || die "Hermes install failed (expected $BIN/hermes)"
 
 # 3) optional: share settings with Windows Hermes
 if [ "$SHARE" = 1 ]; then
@@ -80,6 +87,7 @@ for t in $TOOLS; do install -m 755 "$HERE/bin/$t" "$BIN/$t"; done
 SK="$HH/skills/autonomous-ai-agents/hermes-tmux-team"
 mkdir -p "$SK" && cp "$HERE/skill/hermes-tmux-team/SKILL.md" "$SK/SKILL.md"
 grep -q "$MARK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\nalias hermes=hermes-shared\n' "$MARK" >> "$HOME/.bashrc"
+# shellcheck disable=SC2016  # the single quotes are intentional: $HOME must stay literal in .bashrc
 case ":$PATH:" in *":$BIN:"*) ;; *) grep -q 'local/bin' "$HOME/.bashrc" || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc" ;; esac
 
 say "Installed: $TOOLS"

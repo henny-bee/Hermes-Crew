@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 # Queue a message for a teammate pane. It is typed into that pane only when its Hermes is
-# idle, so it never interrupts a running turn. Returns immediately.
+# idle (empty prompt), so it never interrupts a running turn or a half-typed input. Returns
+# immediately. Every message is logged to <team dir>/.team/messages.log; if it cannot be
+# delivered within HERMES_TEAM_MSG_TIMEOUT seconds (default 3600) the sender is told.
 # usage: hermes-team-msg <role|%pane-id> <message...>
 #        hermes-team-msg --list
-my_pane() {  # the tmux pane whose process is an ancestor of this script
-  local p=$$ id map; map=$(tmux list-panes -a -F '#{pane_pid} #{pane_id}' 2>/dev/null) || return 1
-  while [ "${p:-1}" -gt 1 ]; do
-    id=$(awk -v p="$p" '$1==p{print $2}' <<<"$map"); [ -n "$id" ] && { echo "$id"; return; }
-    p=$(ps -o ppid= -p "$p" | tr -d ' ')
-  done; return 1; }
+# shellcheck source=/dev/null  # hermes-team-lib, next to this script
+. "$(dirname "$(readlink -f "$0")")/hermes-team-lib"
 
 ME=$(my_pane); WIN=${ME:+$(tmux display -p -t "$ME" '#{session_name}:#{window_index}')}
 panes() { if [ -n "$WIN" ]; then tmux list-panes -t "$WIN" -F '#{pane_id} #{@role}'; else tmux list-panes -a -F '#{pane_id} #{@role}'; fi; }
@@ -18,20 +16,36 @@ if [ "$1" = "--list" ]; then panes | awk '{printf "%s %s\n", $1, ($2==""?"(no ro
 
 T=$1; shift
 case "$T" in %*) TARGET=$T ;; *) TARGET=$(panes | awk -v r="$T" 'tolower($2)==tolower(r){print $1; exit}') ;; esac
-[ -n "$TARGET" ] || { echo "no pane with role '$T'. Team: $(panes | awk '{print $2}' | xargs)" >&2; exit 1; }
+{ [ -n "$TARGET" ] && tmux display -p -t "$TARGET" '#{pane_id}' >/dev/null 2>&1; } || { echo "no pane with role '$T'. Team: $(panes | awk '{print $2}' | xargs)" >&2; exit 1; }
 FROM=$( [ -n "$ME" ] && tmux display -p -t "$ME" '#{@role}' ); FROM=${FROM:-user}
-MSG="[from $FROM sent $(date +%H:%M:%S)] $(tr '\n' ' ' <<<"$*")"   # one line: a newline would act as Enter
+BODY=$(tr '\n' ' ' <<<"$*")                                    # one line: a newline would act as Enter
+if [ -n "$HERMES_TEAM_RAW" ]; then MSG=$BODY; else MSG="[from $FROM sent $(date +%H:%M:%S)] $BODY"; fi
+
+TDIR=$(team_dir_of "$TARGET"); [ -n "$TDIR" ] || TDIR=$(team_dir_of "${ME:-$TARGET}")
+if [ -n "$TDIR" ]; then ensure_team "$TDIR"; mkdir -p "$TDIR/.team/locks"; LOCK="$TDIR/.team/locks/${TARGET#%}.lock"; MLOG="$TDIR/.team/messages.log"
+else  # no team dir known: per-user, per-tmux-server lock (pane ids repeat across servers)
+  RD="${XDG_RUNTIME_DIR:-/tmp}/hermes-team-$UID"; mkdir -p "$RD"; chmod 700 "$RD"
+  LOCK="$RD/$(tmux display -p '#{pid}')-${TARGET#%}.lock"; MLOG=""
+fi
+mlog() { [ -n "$MLOG" ] && printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$FROM" "$T" "$1" "${BODY:0:80}" >> "$MLOG"; }
+mlog queued
 
 (
-  exec 9>"/tmp/hermes-team-${TARGET#%}.lock"; flock 9          # one delivery at a time per pane
-  for _ in $(seq 1800); do                                     # wait up to ~1h for idle
-    line=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null | grep '❯' | tail -1) || exit 0
-    # Hermes classic CLI: idle prompt line starts with "❯ "; busy line shows "msg=interrupt".
-    if [[ "$line" == "❯ "* && "$line" != *"msg=interrupt"* ]]; then
-      tmux send-keys -t "$TARGET" -l "$MSG"; sleep 0.4; tmux send-keys -t "$TARGET" Enter; sleep 3; exit 0
+  exec 9>"$LOCK"; flock 9                                      # one delivery at a time per pane
+  end=$((SECONDS + ${HERMES_TEAM_MSG_TIMEOUT:-3600}))
+  while [ $SECONDS -lt "$end" ]; do
+    tmux display -p -t "$TARGET" '#{pane_id}' >/dev/null 2>&1 || break    # pane is gone
+    if pane_idle "$TARGET"; then
+      tmux send-keys -t "$TARGET" -l "$MSG"; sleep 0.4; tmux send-keys -t "$TARGET" Enter; mlog delivered
+      sleep 0.5; for _ in $(seq 40); do pane_idle "$TARGET" || break; sleep 0.25; done   # hold the lock until Hermes reacts
+      exit 0
     fi
-    sleep 2
+    sleep "${HERMES_TEAM_MSG_POLL:-2}"
   done
+  mlog expired
+  if [ -n "$ME" ] && [ -z "$HERMES_TEAM_RAW" ] && tmux display -p -t "$ME" '#{pane_id}' >/dev/null 2>&1; then
+    HERMES_TEAM_RAW=1 "$0" "$ME" "[hermes-team] message to $T expired undelivered: ${BODY:0:80}"
+  fi
 ) >/dev/null 2>&1 &
 disown
 echo "queued for $T ($TARGET); delivered when it is idle"

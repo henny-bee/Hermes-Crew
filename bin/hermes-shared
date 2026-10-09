@@ -5,6 +5,7 @@
 # Windows (old one kept as *.bak-wsl-<time>), then the link is restored.
 export PATH="$HOME/.local/bin:$PATH"
 CONF="$HOME/.config/hermes-team.conf"
+# shellcheck disable=SC1090  # user config, not part of the repo
 [ -f "$CONF" ] && . "$CONF"
 
 if [ -n "${WIN_HOME:-}" ] && [ -d "$WIN_HOME" ]; then
@@ -21,4 +22,6 @@ if [ -n "${WIN_HOME:-}" ] && [ -d "$WIN_HOME" ]; then
     [ -L "$H/$f" ] || ln -s "$WIN_HOME/$f" "$H/$f"
   done
 fi
-exec "$HOME/.local/bin/hermes" "$@"
+HB="${HERMES_TEAM_HERMES:-$HOME/.local/bin/hermes}"        # install.sh may have found hermes elsewhere
+[ -x "$HB" ] || HB=$(command -v hermes) || { echo "hermes not found (run install.sh)" >&2; exit 1; }
+exec "$HB" "$@"

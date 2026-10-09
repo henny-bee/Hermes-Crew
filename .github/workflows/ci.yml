@@ -1,0 +1,19 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tmux and shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux shellcheck
+      - name: Versions
+        run: tmux -V && shellcheck --version | sed -n 2p && bash --version | head -1
+      - name: shellcheck
+        run: shellcheck -x bin/hermes-shared bin/hermes-tmux bin/hermes-team-* install.sh tests/run.sh tests/fake-hermes
+      - name: Tests
+        run: bash tests/run.sh

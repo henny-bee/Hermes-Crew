@@ -120,7 +120,7 @@ Only change the **Goal** line for other jobs. When done, type `stop the team`.
 | Talk to a teammate | click its pane (mouse is on) or `Ctrl+b` + arrow |
 | Zoom a pane / unzoom | `Ctrl+b` `z` |
 | Leave, agents keep running | `Ctrl+b` `d` — run `hermes-wsl` in the same folder to re-attach |
-| Kill everything | `wsl tmux kill-session -t hermes-<folder>` |
+| Kill everything | `wsl tmux kill-session -t hermes-<folder>-<hash>` (see `tmux ls`; the hash is of the full path) |
 | Copy text with mouse on | hold `Shift` while selecting |
 
 ### Commands (used by Hermes, also usable by you inside the tmux window)
@@ -131,10 +131,11 @@ Only change the **Goal** line for other jobs. When done, type `stop the team`.
 | `hermes-tmux [args]` | (WSL/Linux) same thing from a Linux shell |
 | `hermes-team-spawn [--model M] <Role> "<description>"` | split the window, start a Hermes teammate with that role (optionally on another model) |
 | `hermes-team-spawn --models` | models available for teammates |
-| `hermes-team-spawn --kill <Role>` / `--kill --all` | stop one / all teammates |
+| `hermes-team-spawn --kill <Role>` / `--kill --all` | stop one / all teammates (a role or `--all` is required; the lead and unlabelled panes are never touched) |
 | `hermes-team-msg <Role\|lead> "<text>"` | queue a message; typed in when the target is idle (shows send time) |
 | `hermes-team-board decide [--replaces <#>] "<decision>"` | record a shared decision (names, interfaces, formats, numbers); replaced ones disappear from `status` |
 | `hermes-team-board own <file>` | claim a file; only its owner edits it |
+| `hermes-team-board transfer <file> <Role>` / `release <file>` | hand a file to another role / give it up (owner or `lead` only) |
 | `hermes-team-board approve <file> "<what was checked>"` | approve the file's *current content* (non-owners only) |
 | `hermes-team-board status` | team state, decisions, owners, approvals (`OK` / `STALE`) |
 | `hermes-team-msg --list` | show the team (pane id + role) |
@@ -146,7 +147,7 @@ Extra args go to Hermes, e.g. `hermes-wsl -c` resumes the last session.
 
 ## How it works
 
-1. **`hermes-tmux`** starts Hermes inside a tmux session named `hermes-<folder>` and tags its pane
+1. **`hermes-tmux`** starts Hermes inside a tmux session named `hermes-<folder>-<6-hex hash of the full path>` (so two folders with the same name never share a session) and tags its pane
    with the tmux option `@role=lead`. Pane borders show each pane's role.
 2. The **`hermes-tmux-team` skill** tells Hermes: when the user asks for a team, run
    `hermes-team-spawn` per role, assign work with `hermes-team-msg`, then *end your turn* and wait
@@ -157,8 +158,11 @@ Extra args go to Hermes, e.g. `hermes-wsl -c` resumes the last session.
    and queues the teammate's brief (role + how to report).
 4. **`hermes-team-msg`** is the mailbox. Hermes has no API to inject a message into a running
    interactive session, so the message is **typed into the target pane** — but only when that Hermes
-   is idle. It watches the prompt line: `❯ …` = idle, `… msg=interrupt …` = busy (typing then would
-   interrupt the turn). Delivery runs in the background, one message at a time per pane (`flock`),
+   is idle. It reads the cursor line of the pane: idle = the cursor sits right behind an empty prompt (`❯ `,
+   or `<profile> ❯ `; `HERMES_TEAM_PROMPT_SYMBOL` overrides the symbol). A busy placeholder (contains `/steer`,
+   whatever the language), a running slash command, an approval menu or half-typed input all count as not idle.
+   A message that stays undeliverable for an hour (`HERMES_TEAM_MSG_TIMEOUT`) is dropped and the sender is told.
+   Every message is logged to `.team/messages.log`. Delivery runs in the background, one message at a time per pane (`flock`),
    prefixed with sender and send time: `[from Engineer sent 14:02:11] …`.
 5. **`hermes-team-board`** keeps the team honest without assuming any roles. It is an append-only
    log in `<project>/.team/board.log`:
@@ -191,7 +195,9 @@ bin/hermes-tmux                   start the lead in tmux
 bin/hermes-team-spawn             create / stop teammates
 bin/hermes-team-msg               idle-aware messaging between panes
 bin/hermes-team-board             shared decisions, file ownership, content-bound approvals
+bin/hermes-team-lib               helpers sourced by the team scripts (pane lookup, idle detection)
 bin/hermes-shared                 run Hermes; keep shared-config links healthy
+tests/run.sh                      test suite (isolated tmux + fake Hermes): bash tests/run.sh
 skill/hermes-tmux-team/SKILL.md   teaches Hermes the team workflow
 LICENSE                           MIT
 ```
@@ -206,7 +212,7 @@ LICENSE                           MIT
 | Hermes says it is not inside tmux | start it with `hermes-wsl` / `hermes-tmux`, not plain `hermes` |
 | Hermes uses hidden subagents instead of panes | say "create a **team** with teammates …"; check the skill exists: `hermes skills list \| grep tmux-team` (new skills load in a new session) |
 | A teammate never starts working | it is waiting on a first-run or approval question — click its pane and answer |
-| Messages never arrive | panes must use the classic Hermes interface (don't use `--tui` for team sessions) |
+| Messages never arrive | panes must use the classic Hermes interface; the scripts start Hermes with `--cli` (overrides `display.interface: tui`), but a custom prompt skin needs `HERMES_TEAM_PROMPT_SYMBOL` |
 | Text from a teammate mixed with what you typed | you typed in the lead pane at the moment a message was delivered; just resend |
 | `[exited]` right after `hermes-wsl` | run `wsl -e ~/.local/bin/hermes-shared` to see Hermes' own error |
 | Don't run `hermes gateway` in WSL when sharing Windows config | the Windows gateway already uses the same platform tokens — two gateways would both reply |
