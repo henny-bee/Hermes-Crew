@@ -394,6 +394,20 @@ test_heal_keeps_only_five_backups() {
   echo new > "$HOME/.hermes/.env"; hermes-shared --x
   set -- "$WINH"/.env.bak-wsl-*; eq 5 "$#" "backups kept"; [ -f "$WINH/.env.bak-wsl-20200101-000000" ] && die "oldest backup survived"; true; }
 
+test_install_heals_link_replaced_by_plugins_enable() {  # Hermes saves config.yaml atomically: link → plain file
+  rm -rf "$HOME"; mkdir -p "$HOME/.config" "$T/extra"; heal_env; echo "plugins: {}" > "$WINH/config.yaml"
+  ln -s "$WINH/config.yaml" "$HOME/.hermes/config.yaml"
+  cat > "$T/extra/hermes" <<STUB
+#!/usr/bin/env bash
+if [ "\$1 \$2" = "plugins enable" ]; then
+  c=\$HOME/.hermes/config.yaml; { cat "\$c"; echo "enabled: [\$3]"; } > "\$c.tmp"; mv -f "\$c.tmp" "\$c"
+fi
+STUB
+  chmod +x "$T/extra/hermes"
+  PATH=$T/extra:/usr/local/bin:/usr/bin:/bin bash "$ROOT/install.sh" >"$T/install.out" 2>&1 </dev/null || die "install failed: $(<"$T/install.out")"
+  [ -L "$HOME/.hermes/config.yaml" ] || die "config.yaml link not restored after plugins enable"
+  has "$(<"$WINH/config.yaml")" "enabled: [hermes-crew]"; }
+
 # ======================= runner =======================
 ALL=$(declare -F | awk '{print $3}' | grep '^test_'); SEL=${*:-$ALL}; pass=0; fail=0; idx=0; failed=""
 for t in $SEL; do

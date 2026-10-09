@@ -27,11 +27,15 @@ while [ $# -gt 0 ]; do a=$1; shift; case "$a" in
   *) echo "unknown option: $a" >&2; exit 2 ;;
 esac; done
 hermes_cmd() { if [ -x "$BIN/hermes" ]; then echo "$BIN/hermes"; else command -v hermes || true; fi; }
+# Hermes saves config.yaml atomically, which turns a shared-config symlink into a plain file:
+# let hermes-shared push the change to Windows and restore the link (no-op when not sharing).
+heal_links() { grep -qs "^WIN_HOME=" "$CONF" && [ -x "$BIN/hermes-shared" ] && "$BIN/hermes-shared" --version >/dev/null 2>&1 || true; }
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 if [ "$UNINSTALL" = 1 ]; then
   HC=$(hermes_cmd); [ -z "$HC" ] || "$HC" plugins disable "$PLUGIN" </dev/null >/dev/null 2>&1 || true
+  heal_links
   for t in $TOOLS; do rm -f "$BIN/$t"; done
   rm -rf "$HH/plugins/$PLUGIN" "$CONF"
   for k in $SKILLS; do rm -rf "$HH/skills/autonomous-ai-agents/$k"; done
@@ -104,7 +108,7 @@ done
 rm -rf "${HH:?}/plugins/$PLUGIN"; mkdir -p "$HH/plugins"; cp -r "$HERE/plugin/$PLUGIN" "$HH/plugins/$PLUGIN"
 find "$HH/plugins/$PLUGIN" -name __pycache__ -type d -prune -exec rm -rf {} +
 HC=$(hermes_cmd)
-if [ -n "$HC" ] && "$HC" plugins enable "$PLUGIN" </dev/null; then :
+if [ -n "$HC" ] && "$HC" plugins enable "$PLUGIN" </dev/null; then heal_links
 else echo "WARNING: could not enable the plugin; run: hermes plugins enable $PLUGIN" >&2; fi
 grep -q "$MARK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\nalias hermes=hermes-shared\n' "$MARK" >> "$HOME/.bashrc"
 # shellcheck disable=SC2016  # the single quotes are intentional: $HOME must stay literal in .bashrc
