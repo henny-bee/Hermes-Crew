@@ -1,0 +1,20 @@
+name: hermes-crew
+version: 3.0.0
+description: "Hermes Crew: tmux agent teams. Tracks this agent's state (idle/busy/blocked), delivers team mailbox messages only while idle, guards files owned by other roles, and (lead only) runs a watchdog for stalls, dead agents and waiting prompts. Inert unless HERMES_TEAM_DIR and HERMES_TEAM_ROLE are set."
+author: Hermes Crew
+kind: standalone
+platforms:
+  - linux
+  - macos
+provides_hooks:
+  - on_session_start
+  - pre_llm_call
+  - on_session_end
+  - on_session_finalize
+  - on_session_reset
+  - on_human_input_request
+  - on_human_input_resolved
+  - post_api_request
+  - api_request_error
+  - pre_tool_call
+  - post_tool_call

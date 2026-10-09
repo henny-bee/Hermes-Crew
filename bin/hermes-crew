@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""hermes-crew: team messages, tasks, board and status for Hermes agent teams.
+
+Finds the hermes_crew package: $HERMES_CREW_LIB -> <checkout>/plugin/hermes-crew (when run from the repo)
+-> ${HERMES_HOME:-~/.hermes}/plugins/hermes-crew.
+"""
+import os
+import sys
+
+if sys.version_info < (3, 10):
+    sys.exit(f"hermes-crew needs Python >= 3.10 (this is {sys.version.split()[0]})")
+
+
+def _candidates():
+    env = os.environ.get("HERMES_CREW_LIB")
+    if env:
+        yield env
+    here = os.path.dirname(os.path.realpath(__file__))
+    yield os.path.join(here, "..", "plugin", "hermes-crew")
+    home = os.environ.get("HERMES_HOME") or os.path.join(os.path.expanduser("~"), ".hermes")
+    yield os.path.join(home, "plugins", "hermes-crew")
+
+
+for _d in _candidates():
+    if os.path.isfile(os.path.join(_d, "hermes_crew", "cli.py")):
+        sys.path.insert(0, os.path.abspath(_d))
+        break
+else:
+    sys.exit("hermes-crew: cannot find the hermes_crew package (looked in $HERMES_CREW_LIB, the checkout, "
+             "${HERMES_HOME:-~/.hermes}/plugins/hermes-crew) - re-run install.sh")
+
+from hermes_crew.cli import main  # noqa: E402
+
+sys.exit(main())
