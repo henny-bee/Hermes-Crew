@@ -165,3 +165,18 @@ def test_concurrent_claim_one_winner(team, tmp_path):
         assert sum(json.loads(o.read_text()) for o in outs) == 1
     claims = [x for x in tasks.history(team, "T1") if x["op"] == "claim"]
     assert len(claims) == 1
+
+
+def test_done_with_note(team, tmp_path):
+    tasks.add(team, "lead", "a", owner="Eng")
+    tasks.add(team, "lead", "b", owner="Eng")
+    with pytest.raises(TaskError, match="not both"):
+        tasks.done(team, "Eng", "T1", handoff=tmp_path / "x", note="y")
+    with pytest.raises(TaskError, match="--note is empty"):
+        tasks.done(team, "Eng", "T1", note="  ")
+    t = tasks.done(team, "Eng", "T1", note="parser done.\nedge cases: see tests/test_x.py")
+    assert t["handoff"] == ".team/handoff/T1.md"
+    assert team.path("handoff", "T1.md").read_text() == "parser done.\nedge cases: see tests/test_x.py\n"
+    assert tasks.handoff_text(team, t).startswith("parser done.")
+    assert list(team.root.iterdir()) == [team.dir]          # nothing written into the project
+    assert tasks.handoff_text(team, tasks.get(team, "T2")) is None

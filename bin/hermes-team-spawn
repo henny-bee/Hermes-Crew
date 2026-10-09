@@ -56,9 +56,11 @@ launch() {  # launch <Role> <model> <command>: new pane to the right, labelled; 
   tmux set -w -t "$WIN" pane-border-format ' #{?@role,#{@role},#{pane_index}}#{?@model, (#{@model}),} '
   relayout; }
 
+hh() { [ -z "${HERMES_HOME:-}" ] || printf ' HERMES_HOME=%q' "$HERMES_HOME"; }   # panes get the tmux SERVER's env, so pass a custom HERMES_HOME explicitly
+
 v3_cmd() {  # v3_cmd <Role> <model> <query file>: env tells the plugin who it is; the named session is resumable
-  printf 'env HERMES_TEAM_DIR=%q HERMES_TEAM_ROLE=%q HERMES_CREW_SESSION=%q hermes-shared chat --cli -s hermes-tmux-teammate --continue %q --create-if-missing --query-file %q' \
-    "$TEAM_DIR" "$1" "$SESSION" "team-$(printf %s "$TEAM_DIR" | sha1sum | cut -c1-6)-$1" "$3"
+  printf 'env HERMES_TEAM_DIR=%q HERMES_TEAM_ROLE=%q HERMES_CREW_SESSION=%q%s hermes-shared chat --cli -s hermes-tmux-teammate --continue %q --create-if-missing --query-file %q' \
+    "$TEAM_DIR" "$1" "$SESSION" "$(hh)" "team-$(printf %s "$TEAM_DIR" | sha1sum | cut -c1-6)-$1" "$3"
   [ -z "$2" ] || printf ' -m %q' "$2"; }
 
 case "$1" in
@@ -114,7 +116,7 @@ fi
 
 if [ $INSTALLED = 1 ]; then echo "WARNING: hermes-crew plugin is installed but not enabled: hermes plugins enable hermes-crew" >&2
 else echo "WARNING: hermes-crew plugin not installed (run install.sh): messaging falls back to typing into panes" >&2; fi
-launch "$ROLE" "$MODEL" "hermes-shared --cli${MODEL:+ -m $(printf '%q' "$MODEL")}"
+launch "$ROLE" "$MODEL" "$(hh | sed 's/^ /env /;s/$/ /')hermes-shared --cli${MODEL:+ -m $(printf '%q' "$MODEL")}"
 TEAM=$(tmux list-panes -t "$WIN" -F '#{@role}' | xargs)
 BRIEF="You are $ROLE, a teammate in a Hermes agent team (other members: $TEAM; 'lead' orchestrates). Your role: $DESC -- Team directory: $TEAM_DIR. TEAM PROTOCOL: (1) Act on assignments from lead, and on teammates' requests that concern your assignment; otherwise wait. (2) Shared decisions: run 'hermes-team-board status' before producing anything that depends on names, interfaces, formats or numbers others also use; follow recorded decisions; record new ones with: hermes-team-board decide \"...\"; to change decision #N, agree it with lead, then record: hermes-team-board decide --replaces N \"...\" - never silently diverge. (3) Files: claim every file you author with: hermes-team-board own <file>. Never edit a file owned by someone else - message its owner with the exact change you need (to hand a file over: hermes-team-board transfer <file> <Role>). (4) Reviews: read the actual current file, report concrete issues (file + section) to its owner; only when none remain run: hermes-team-board approve <file> \"<what you checked>\". Approvals auto-expire when the file changes. (5) Evidence: never claim a check, test or verification passed unless you actually ran it; otherwise write 'not verified'. (6) Messages: send only new information, requests or results - no thanks/acknowledgement-only messages. Messages show their send time; ignore ones already done or superseded. (7) Report results to lead with: hermes-team-msg lead \"...\". Reply 'ready' now."
 hermes-team-msg "$NEW" "$BRIEF" >/dev/null

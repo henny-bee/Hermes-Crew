@@ -191,9 +191,13 @@ def cmd_task(a) -> int:
         if not t:
             raise Refused(f"REFUSED: no task {tasks.norm_id(a.id)} - see: hermes-crew task list")
         print(_task_line(t))
-        for k in ("desc", "deps", "created_by", "created", "updated", "reason", "handoff", "prev_owner"):
+        for k in ("desc", "deps", "created_by", "created", "updated", "reason", "prev_owner"):
             if t.get(k):
                 print(f"  {k}: {', '.join(t[k]) if isinstance(t[k], list) else t[k]}")
+        note = tasks.handoff_text(team, t)
+        if t.get("handoff"):
+            print(f"  handoff note ({t['handoff']}):")
+            print("\n".join(f"    {line}" for line in (note or "(file missing)").rstrip("\n").splitlines()))
         vs = verify.records(team, t["id"])
         for v in vs[-3:]:
             print(f"  verify {v['t'][11:19]} by {v['by']}: exit {v['exit']} ({v['duration_s']} s) {v['cmd']}")
@@ -219,7 +223,7 @@ def cmd_task(a) -> int:
         print(f"{t['id']} unblocked, in progress ({t['owner']})")
     elif op == "done":
         before = {x["id"]: x for x in tasks.list_tasks(team)}
-        t = tasks.done(team, me, a.id, handoff=a.handoff)
+        t = tasks.done(team, me, a.id, handoff=a.handoff, note=a.note)
         print(f"{t['id']} done" + (f" (handoff: {t['handoff']})" if t.get("handoff") else ""))
         for x in tasks.list_tasks(team):
             if x["deps"] and x["ready"] and x["status"] != "done" and not before[x["id"]]["ready"]:
@@ -321,9 +325,11 @@ def build_parser() -> argparse.ArgumentParser:
     x = ts.add_parser("reopen")
     x.add_argument("id")
     x.add_argument("reason", nargs="+")
-    x = ts.add_parser("done")
+    x = ts.add_parser("done", help='done <id> [--note "<handoff text>" | --handoff FILE]')
     x.add_argument("id")
-    x.add_argument("--handoff", metavar="FILE", help="notes for whoever continues; copied to .team/handoff/<id>.md")
+    g = x.add_mutually_exclusive_group()
+    g.add_argument("--note", metavar="TEXT", help="handoff note for whoever continues (saved as .team/handoff/<id>.md)")
+    g.add_argument("--handoff", metavar="FILE", help="an existing file with the handoff note; copied to .team/handoff/<id>.md")
     x = ts.add_parser("assign")
     x.add_argument("id")
     x.add_argument("role")

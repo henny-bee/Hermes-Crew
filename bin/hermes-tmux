@@ -17,7 +17,7 @@ fi
 NAME="hermes-$(basename "$PWD" | tr -c 'A-Za-z0-9_\n-' '_')-$(printf %s "$PWD" | sha1sum | cut -c1-6)"
 if ! tmux has-session -t "$NAME" 2>/dev/null; then
   tmux new-session -d -s "$NAME" -c "$PWD" -x "$(tput cols 2>/dev/null || echo 200)" -y "$(tput lines 2>/dev/null || echo 50)" \
-    "env HERMES_TEAM_DIR=$(printf %q "$PWD") HERMES_TEAM_ROLE=lead HERMES_CREW_SESSION=$NAME hermes-shared --cli -s hermes-tmux-team${*:+ $(printf '%q ' "$@")}"   # preload the team skill for the lead
+    "env HERMES_TEAM_DIR=$(printf %q "$PWD") HERMES_TEAM_ROLE=lead HERMES_CREW_SESSION=$NAME${HERMES_HOME:+ HERMES_HOME=$(printf %q "$HERMES_HOME")} hermes-shared --cli -s hermes-tmux-team${*:+ $(printf '%q ' "$@")}"   # preload the team skill for the lead
   tmux set -t "$NAME" mouse on                       # click a pane to talk to that agent
   tmux set -w -t "$NAME" pane-border-status top
   tmux set -w -t "$NAME" pane-border-format ' #{?@role,#{@role},#{pane_index}} '

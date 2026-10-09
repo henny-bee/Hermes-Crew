@@ -12,7 +12,7 @@
 #   FAKE_PROMPT_ROW   screen row of the bottom separator (default: last row); prompt is one row above
 log() { printf '%s %s %s %s\n' "$(date +%s.%N)" "${TMUX_PANE:-?}" "$1" "$2" >> "${FAKE_LOG:-/dev/null}"; }
 log ARGS "$*"
-log ENV "dir=${HERMES_TEAM_DIR:-} role=${HERMES_TEAM_ROLE:-} session=${HERMES_CREW_SESSION:-}"
+log ENV "dir=${HERMES_TEAM_DIR:-} role=${HERMES_TEAM_ROLE:-} session=${HERMES_CREW_SESSION:-} home=${HERMES_HOME:-}"
 # `chat --cli -s skill --continue name --query-file F`: F is the first input of the session
 qf=""; prev=""; for a in "$@"; do [ "$prev" = --query-file ] && qf=$a; prev=$a; done
 if [ -n "$qf" ] && [ -f "$qf" ]; then q=$(<"$qf"); log QUERY "${q//$'\n'/ ⏎ }"; fi

@@ -26,8 +26,9 @@ brief. Everything below is done with `hermes-crew` in your terminal tool.
   `hermes-crew board decide --replaces N "..."`. Never diverge silently.
 - Tasks: `hermes-crew task list --mine`, then
   `task claim <id>` (unowned task) · `task start <id>` · `task block <id> "<reason>"` ·
-  `task done <id> --handoff <file>`.
-  Write the handoff note first: what changed, how it was verified, open issues.
+  `task done <id> --note "<what changed, how verified, open issues>"`.
+  The note is stored in `.team/handoff/<id>.md` — never write handoff notes as files in the project.
+  For a longer note keep the file under `.team/` and pass `--handoff <file>`.
   Add or split tasks if needed: `hermes-crew task add "<title>" [--deps T1] [--owner Role]`.
   When a task of yours becomes unblocked you are told automatically.
 

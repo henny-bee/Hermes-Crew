@@ -76,7 +76,10 @@ Other views: `hermes-crew inbox`, `hermes-crew log -n 30`, `hermes-crew task lis
 
 Only tell the user the work is finished when `hermes-crew status --done-check` exits **0**.
 It requires: every task done; every owned file has an OK (non-stale) approval from a non-owner;
-the last `hermes-crew verify` of every task passes. If it prints violations, send the work
+the last `hermes-crew verify` of every task passes. Reviewers approve with
+`hermes-crew board approve <file> "<what was checked>"` (there is no `hermes-crew approve`);
+`hermes-crew board status` lists files, owners and approvals. Never `release`/`transfer` a
+deliverable just to satisfy the check. If it prints violations, send the work
 back (`hermes-crew send ...`; a wrongly-finished task: `hermes-crew task reopen <id> "<reason>"`) instead of declaring success.
 In your final answer include the `--done-check` output, the key results, and a list of
 anything **not verified**. Then offer to stop the team.

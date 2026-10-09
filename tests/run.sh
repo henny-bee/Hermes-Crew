@@ -305,6 +305,26 @@ test_board_is_a_wrapper_for_hermes_crew() {
   lead_run hermes-team-board decide "via wrapper"; eq 0 "$RC"; has "$OUT" "decision #1 recorded"
   lead_run hermes-team-board; eq 2 "$RC"; has "$OUT" "hermes-team-board decide"; }
 
+# Panes inherit the tmux SERVER's environment, not the caller's: a custom HERMES_HOME must be passed explicitly.
+custom_home() { H=$T/profile; mkdir -p "$H/plugins/hermes-crew"; : > "$H/plugins/hermes-crew/plugin.yaml"
+  ln -s "$ROOT/plugin/hermes-crew/hermes_crew" "$H/plugins/hermes-crew/hermes_crew"
+  printf 'plugins:\n  enabled:\n    - hermes-crew\n' > "$H/config.yaml"; Q=$(printf %q "$H"); }
+
+test_hermes_home_reaches_lead_pane() {
+  custom_home; tmux new-session -d -s other "sleep 300"            # the server exists already, without HERMES_HOME
+  mkdir -p "$T/a/proj"; (cd "$T/a/proj" && HERMES_HOME=$H hermes-tmux </dev/null >/dev/null 2>&1)
+  await 5 "lead home" "grep -q 'role=lead .*home=$H\$' $FAKE_LOG"; }
+
+test_hermes_home_reaches_teammates_and_restart() {
+  custom_home; lead_start
+  lead_run "HERMES_HOME=$Q hermes-team-spawn Eng e"; eq 0 "$RC" "$OUT"; hasnt "$OUT" WARNING            # v3: enabled in THAT home's config
+  await 10 "v3 teammate" "grep -q 'role=Eng .*home=$H\$' $FAKE_LOG"
+  has "$(tmux list-panes -t t -F '#{pane_start_command}')" "HERMES_HOME=$Q"
+  lead_run "HERMES_HOME=$Q hermes-team-spawn --restart Eng"; eq 0 "$RC" "$OUT"
+  await 10 "restart keeps the home" "[ \$(grep -c 'role=Eng .*home=$H\$' $FAKE_LOG) = 2 ]"
+  rm "$H/config.yaml"; lead_run "HERMES_HOME=$Q hermes-team-spawn Rev r"       # not enabled there -> v2 path, home still passed
+  has "$OUT" "installed but not enabled"; await 10 "v2 teammate" "grep -q 'ENV dir= role= session= home=$H\$' $FAKE_LOG"; }
+
 test_lead_gets_team_env() {
   v3_on; mkdir -p "$T/a/proj"; (cd "$T/a/proj" && hermes-tmux </dev/null >/dev/null 2>&1)
   await 5 "args" "grep -q 'ENV dir=$T/a/proj role=lead session=hermes-proj-' $FAKE_LOG"

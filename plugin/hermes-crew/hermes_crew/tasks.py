@@ -292,9 +292,15 @@ def unblock(team: Team, by: str, task_id: str) -> dict:
     return t
 
 
-def done(team: Team, by: str, task_id: str, handoff: str | Path | None = None) -> dict:
-    """Mark done. `handoff` = a file whose text is copied to .team/handoff/<id>.md.
+def done(team: Team, by: str, task_id: str, handoff: str | Path | None = None,
+         note: str | None = None) -> dict:
+    """Mark done. The handoff note goes to .team/handoff/<id>.md: `note` = its text, or
+    `handoff` = an existing file whose text is copied (not both).
     Newly ready dependents: owner (or lead if unowned) gets a message from hermes-crew."""
+    if handoff is not None and note is not None:
+        raise TaskError("REFUSED: give either --note \"<text>\" or --handoff FILE, not both")
+    if note is not None and not note.strip():
+        raise TaskError("REFUSED: --note is empty - write what the next person needs to know")
     if handoff is not None and not Path(handoff).is_file():
         raise TaskError(f"REFUSED: handoff file {handoff} does not exist - write it first, then rerun")
     with team.lock("tasks"):
@@ -307,8 +313,11 @@ def done(team: Team, by: str, task_id: str, handoff: str | Path | None = None) -
         if t["status"] in ("open", "orphaned"):
             raise TaskError(f"REFUSED: {tid} is {t['status']} - claim it first: hermes-crew task claim {tid}")
         fields = {}
-        if handoff is not None:
-            dst = team.path("handoff", f"{tid}.md")
+        dst = team.path("handoff", f"{tid}.md")
+        if note is not None:
+            store.write_text_atomic(dst, note.rstrip("\n") + "\n")
+            fields["handoff"] = f".team/handoff/{tid}.md"
+        elif handoff is not None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             if Path(handoff).resolve() != dst.resolve():
                 shutil.copyfile(handoff, dst)
@@ -318,6 +327,17 @@ def done(team: Team, by: str, task_id: str, handoff: str | Path | None = None) -
     _emit(team, ln)
     _notify_unblocked(team, before, after)
     return after[tid]
+
+
+def handoff_text(team: Team, task: dict) -> str | None:
+    """Text of the task's handoff note, or None."""
+    rel = task.get("handoff")
+    if not rel:
+        return None
+    try:
+        return (team.root / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
 
 
 def _notify_unblocked(team: Team, before: dict[str, dict], after: dict[str, dict]) -> list[str]:

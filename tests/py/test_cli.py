@@ -143,3 +143,47 @@ def test_launcher_subprocess(tmp_path):
     env["HERMES_CREW_LIB"] = str(tmp_path / "nowhere")
     p = subprocess.run([sys.executable, str(REPO / "bin" / "hermes-crew"), "--version"], capture_output=True, text=True, env=env)
     assert p.returncode == 0          # falls back to the checkout
+
+
+def test_task_done_note_and_show(team, as_role):
+    tasks.add(team, "lead", "x", owner="Eng")
+    rc, _, err = as_role("Eng", "task", "done", "T1", "--note", "a", "--handoff", "f.md")
+    assert rc == 2 and "not allowed with" in err
+    rc, out, _ = as_role("Eng", "task", "done", "T1", "--note", "API is parse(text); see README")
+    assert rc == 0 and "T1 done (handoff: .team/handoff/T1.md)" in out
+    rc, out, _ = as_role("lead", "task", "show", "T1")
+    assert "  handoff note (.team/handoff/T1.md):\n    API is parse(text); see README" in out
+    assert sorted(p.name for p in team.root.iterdir()) == [".team"]
+
+
+READ_ONLY = [["doctor"], ["doctor", "--json"], ["status"], ["status", "--json"], ["status", "--done-check"],
+             ["log"], ["inbox"], ["inbox", "--all"], ["task", "list"], ["task", "list", "--mine"],
+             ["task", "show", "T1"], ["board", "status"]]
+
+
+@pytest.mark.parametrize("argv", READ_ONLY, ids=lambda a: " ".join(a))
+@pytest.mark.parametrize("via_env", [False, True], ids=["cwd", "HERMES_TEAM_DIR"])
+def test_read_only_commands_never_create_team(tmp_path, monkeypatch, capsys, argv, via_env):
+    proj = tmp_path / "notateam"
+    proj.mkdir()
+    monkeypatch.chdir(proj)
+    if via_env:
+        monkeypatch.setenv("HERMES_TEAM_DIR", str(proj))
+    monkeypatch.setenv("HERMES_TEAM_ROLE", "lead")
+    try:
+        cli.main(argv)
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert list(proj.iterdir()) == [], f"{argv} wrote into a non-team dir"
+    if argv == ["doctor"]:
+        assert "not inside a team" in out
+
+
+def test_doctor_subprocess_outside_team(tmp_path):
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "TMUX_TMPDIR": str(tmp_path)}
+    proj = tmp_path / "repo"
+    proj.mkdir()
+    p = subprocess.run([sys.executable, str(REPO / "bin" / "hermes-crew"), "doctor"], cwd=proj,
+                       capture_output=True, text=True, env=env)
+    assert "not inside a team" in p.stdout and not (proj / ".team").exists()

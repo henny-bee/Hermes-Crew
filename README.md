@@ -146,7 +146,7 @@ Watch the team from a second tmux window: `hermes-crew watch`.
 | `inbox [--all]` | my pending (`--all`: also recent) messages |
 | `task add "<title>" [--deps T1,T2] [--owner R] [--priority N] [--desc …]` | create a task |
 | `task claim\|start\|unblock <id>`, `task block <id> "<reason>"` | work the task |
-| `task done <id> [--handoff FILE]` | finish (handoff copied to `.team/handoff/<id>.md`) |
+| `task done <id> [--note "<text>" \| --handoff FILE]` | finish; the handoff note (what changed, how verified, open issues) is stored in `.team/handoff/<id>.md` |
 | `task assign <id> <Role>`, `task reopen <id> "<reason>"` | lead: (re)assign / send back |
 | `task list [--mine] [--json]`, `task show <id>` | inspect |
 | `verify <task> [--timeout S] -- <cmd…>` | run a command, record exit code + output as evidence; exits with its code |
