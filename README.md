@@ -19,15 +19,10 @@ labelled pane. They share a task list, message each other and report back to the
 - **Evidence and done-check** — `hermes-crew verify` records results; the lead may only report
   "done" when `hermes-crew status --done-check` passes.
 
-```
-┌──────────────────────────┬──────────── Planner ────────────┐
-│ lead (you talk here)     │ [from lead] T1: plan ...        │
-│                          ├──────────── Engineer ───────────┤
-│ [from Engineer] T2 done  │ T2 in progress: write hello.txt │
-│ [from Supervisor] ok     ├──────────── Supervisor ─────────┤
-│                          │ [from Engineer] please review   │
-└──────────────────────────┴─────────────────────────────────┘
-```
+
+<img width="1280" height="640" alt="image" src="https://github.com/user-attachments/assets/fa05ea11-1f82-44c2-aeb4-e520403253db" />
+
+
 
 ## Quick start
 
