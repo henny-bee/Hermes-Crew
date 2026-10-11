@@ -25,9 +25,15 @@ SUBDIRS = ("tmp", "new", "cur", "expired")
 def box(team: Team, role: str) -> Path:
     """Mailbox dir of `role`; an existing dir with another spelling (case-insensitive) wins."""
     root = team.path("mail")
-    if root.is_dir() and not (root / role).is_dir():
-        for d in root.iterdir():
-            if d.is_dir() and d.name.lower() == role.lower():
+    if root.is_dir():
+        # Compare listed names, not (root / role).is_dir(): on a case-insensitive filesystem (macOS)
+        # that is true for any spelling, and the caller's spelling would leak into message headers.
+        dirs = [d for d in root.iterdir() if d.is_dir()]
+        for d in dirs:
+            if d.name == role:
+                return d
+        for d in dirs:
+            if d.name.lower() == role.lower():
                 return d
     return root / role
 

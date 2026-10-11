@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import subprocess
 import sys
 
 import pytest
 from conftest import REPO
 from hermes_crew import __version__, cli, mailbox, state, tasks
+
+# Minimal PATH for launcher subprocesses, with the running interpreter's dir first: macOS ships
+# /usr/bin/python3 3.9, which the launcher (rightly) refuses.
+MIN_PATH = os.pathsep.join([os.path.dirname(sys.executable), "/usr/bin", "/bin"])
 
 
 @pytest.fixture
@@ -134,7 +139,7 @@ def test_board_passthrough(team, as_role):
 
 def test_launcher_subprocess(tmp_path):
     env = {
-        "PATH": "/usr/bin:/bin",
+        "PATH": MIN_PATH,
         "HOME": str(tmp_path),
         "HERMES_TEAM_DIR": str(tmp_path / "p"),
         "HERMES_TEAM_ROLE": "lead",
@@ -200,7 +205,7 @@ def test_read_only_commands_never_create_team(tmp_path, monkeypatch, capsys, arg
 
 
 def test_doctor_subprocess_outside_team(tmp_path):
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "TMUX_TMPDIR": str(tmp_path)}
+    env = {"PATH": MIN_PATH, "HOME": str(tmp_path), "TMUX_TMPDIR": str(tmp_path)}
     proj = tmp_path / "repo"
     proj.mkdir()
     p = subprocess.run([str(REPO / "bin" / "hermes-crew"), "doctor"], cwd=proj, capture_output=True, text=True, env=env)

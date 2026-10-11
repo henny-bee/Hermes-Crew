@@ -29,7 +29,7 @@ esac; done
 hermes_cmd() { if [ -x "$BIN/hermes" ]; then echo "$BIN/hermes"; else command -v hermes || true; fi; }
 # Hermes saves config.yaml atomically, which turns a shared-config symlink into a plain file:
 # let hermes-shared push the change to Windows and restore the link (no-op when not sharing).
-heal_links() { grep -qs "^WIN_HOME=" "$CONF" && [ -x "$BIN/hermes-shared" ] && "$BIN/hermes-shared" --version >/dev/null 2>&1 || true; }
+heal_links() { if grep -qs "^WIN_HOME=" "$CONF" && [ -x "$BIN/hermes-shared" ]; then "$BIN/hermes-shared" --version >/dev/null 2>&1 || true; fi; }
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 

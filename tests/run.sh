@@ -4,7 +4,7 @@
 # (TMUX_TMPDIR), with tests/fake-hermes standing in for Hermes. Nothing touches the real
 # ~/.hermes, ~/.local/bin or the real tmux server.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-RUN=$(mktemp -d "${TMPDIR:-/tmp}/hermes-tests.XXXXXX"); trap 'rm -rf "$RUN"' EXIT
+tmp=${TMPDIR:-/tmp}; RUN=$(mktemp -d "${tmp%/}/hermes-tests.XXXXXX")   # macOS $TMPDIR ends in "/"; trap 'rm -rf "$RUN"' EXIT
 export LC_ALL=C.UTF-8; locale -a 2>/dev/null | grep -qixE 'c\.utf-?8' || export LC_ALL=en_US.UTF-8   # macOS has no C.UTF-8
 for c in tmux git; do command -v "$c" >/dev/null || { echo "tests need $c" >&2; exit 2; }; done
 # PATH inside tests: the system dirs, plus where tmux / a python3 >= 3.10 live if not there (macOS: Homebrew)
@@ -176,6 +176,8 @@ test_msg_not_delivered_while_half_typed() {
 test_msg_to_vanished_pane_expires_at_once() {
   export FAKE_MENU=1 HERMES_TEAM_MSG_TIMEOUT=300; lead_start; fake_pane Eng; send hermes-team-msg Eng "nobody home"; sleep 1
   tmux kill-pane -t "$P"; await 8 "expiry on pane loss" "grep -q 'expired' $PROJ/.team/messages.log"
+  # the sender is told by typing into the lead pane: let that finish, or it interleaves with lead_run's keys
+  await 8 "lead told" "grep -q 'delivered.*expired undelivered' $PROJ/.team/messages.log"
   lead_run hermes-team-msg %999 hi; eq 1 "$RC" "unknown pane id"; }
 
 test_msg_unknown_role() { lead_start; lead_run hermes-team-msg Nobody hi; eq 1 "$RC"; has "$OUT" "no pane with role"; }
@@ -252,7 +254,7 @@ test_spawn_v3_brief_file_and_pane_command() {
 
 test_spawn_v3_brief_survives_odd_characters() {
   v3_on; lead_start; d="say \"hi\" \$(touch $T/pwned) \`touch $T/pwned2\` 'quoted'"; lead_run hermes-team-spawn Eng "$(printf %q "$d")"; eq 0 "$RC" "$OUT"
-  await 10 "query" "grep -q 'QUERY You are Eng' $FAKE_LOG"; [ ! -e "$T/pwned" ] && [ ! -e "$T/pwned2" ] || die "description was executed"
+  await 10 "query" "grep -q 'QUERY You are Eng' $FAKE_LOG"; { [ -e "$T/pwned" ] || [ -e "$T/pwned2" ]; } && die "description was executed"
   has "$(<"$PROJ/.team/briefs/Eng.md")" "'quoted'"; }
 
 test_restart_resumes_named_session() {
@@ -261,19 +263,22 @@ test_restart_resumes_named_session() {
   lead_run hermes-team-spawn --restart eng; eq 0 "$RC" "$OUT"; has "$OUT" "restarted Eng (m1)"
   await 10 "restart query" "grep -q 'QUERY You were restarted' $FAKE_LOG"
   has "$(flog)" "LINE /exit" "old pane was asked to exit"
-  new=$(tmux list-panes -t t -F '#{pane_id} #{@role}' | awk '$2=="Eng"{print $1}'); [ -n "$new" ] && [ "$new" != "$old" ] || die "no new pane ($old -> $new)"
+  new=$(tmux list-panes -t t -F '#{pane_id} #{@role}' | awk '$2=="Eng"{print $1}'); if [ -z "$new" ] || [ "$new" = "$old" ]; then die "no new pane ($old -> $new)"; fi
   eq 1 "$(tmux list-panes -t t -F '#{@role}' | grep -c Eng)"
   has "$(tmux list-panes -t t -F '#{pane_start_command}' | grep Eng)" "--continue team-$(team_hash)-Eng --create-if-missing --query-file $PROJ/.team/briefs/Eng.restart.md -m m1"
   has "$(<"$PROJ/.team/briefs/Eng.restart.md")" "hermes-crew task list --mine"
   lead_run hermes-team-spawn --restart Nobody; eq 1 "$RC"; lead_run hermes-team-spawn --restart; eq 2 "$RC"; }
 
 test_spawn_v2_when_plugin_installed_but_not_enabled() {
-  plugin_installed; lead_start
+  plugin_installed; lead_start; n=0
   for cfg in "" "plugins:\n  enabled: []\n" "plugins:\n  enabled:\n    - other\n  disabled:\n    - hermes-crew\n"; do
-    printf '%b' "$cfg" > "$HOME/.hermes/config.yaml"; tmux kill-pane -a -t "$LEAD"
+    printf '%b' "$cfg" > "$HOME/.hermes/config.yaml"; tmux kill-pane -a -t "$LEAD"; n=$((n+1))
     lead_run hermes-team-spawn Eng "e"; eq 0 "$RC" "$OUT"; has "$OUT" "plugin is installed but not enabled: hermes plugins enable hermes-crew"
     [ ! -e "$PROJ/.team/briefs/Eng.md" ] || die "v3 brief written although the plugin is not enabled"
-    hasnt "$(tmux list-panes -t t -F '#{pane_start_command}')" "hermes-tmux-teammate"; done
+    hasnt "$(tmux list-panes -t t -F '#{pane_start_command}')" "hermes-tmux-teammate"
+    # let the brief land: killing its pane while it is queued makes it expire, and the expiry notice
+    # typed into the lead pane would interleave with the next lead_run
+    await 15 "brief $n delivered" "[ \"\$(grep -c 'delivered.You are Eng' $PROJ/.team/messages.log)\" -ge $n ]"; done
   printf 'plugins:\n  enabled: [other, "hermes-crew"]\n' > "$HOME/.hermes/config.yaml"; tmux kill-pane -a -t "$LEAD"
   lead_run hermes-team-spawn Eng "e"; hasnt "$OUT" "not enabled"; has "$(tmux list-panes -t t -F '#{pane_start_command}')" "hermes-tmux-teammate"; }
 

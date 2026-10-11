@@ -18,7 +18,9 @@ heal() {
   for f in config.yaml .env auth.json SOUL.md; do
     [ -e "$WIN_HOME/$f" ] || continue
     if [ -f "$H/$f" ] && [ ! -L "$H/$f" ]; then
-      if [ "$H/$f" -nt "$WIN_HOME/$f" ]; then
+      # a tie counts as WSL-newer: the plain file exists because Hermes saved it here, and bash 3.2
+      # (macOS) compares whole seconds only, so a save right after the link was made looks "equal"
+      if [ ! "$WIN_HOME/$f" -nt "$H/$f" ]; then
         cp -p "$WIN_HOME/$f" "$WIN_HOME/$f.bak-wsl-$ts"
         cp "$H/$f" "$WIN_HOME/$f"
       else
