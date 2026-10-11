@@ -2,12 +2,14 @@
 
 Every line: {"ts","t","by","op","id",...}. All check-then-append happens under the `tasks` lock.
 """
+
 from __future__ import annotations
 
 import re
 import shutil
 import time
 from pathlib import Path
+from typing import Any
 
 from . import events, mailbox, store
 from .team import SYSTEM, Team, is_lead, same_role
@@ -34,14 +36,23 @@ def _num(task_id: str) -> int:
 
 
 # ---------------------------------------------------------------- fold
-def _apply(tasks: dict[str, dict], ln: dict) -> None:
-    op, tid = ln.get("op"), ln.get("id")
+def _apply(tasks: dict[str, dict[str, Any]], ln: dict[str, Any]) -> None:
+    op: Any = ln.get("op")
+    tid: Any = ln.get("id")
     if op == "add":
         tasks[tid] = {
-            "id": tid, "title": ln.get("title", ""), "deps": list(ln.get("deps") or []),
-            "priority": int(ln.get("priority") or 3), "owner": ln.get("owner"), "desc": ln.get("desc"),
-            "status": "claimed" if ln.get("owner") else "open", "created_by": ln.get("by"),
-            "created": ln.get("t"), "updated": ln.get("t"), "reason": None, "handoff": None,
+            "id": tid,
+            "title": ln.get("title", ""),
+            "deps": list(ln.get("deps") or []),
+            "priority": int(ln.get("priority") or 3),
+            "owner": ln.get("owner"),
+            "desc": ln.get("desc"),
+            "status": "claimed" if ln.get("owner") else "open",
+            "created_by": ln.get("by"),
+            "created": ln.get("t"),
+            "updated": ln.get("t"),
+            "reason": None,
+            "handoff": None,
             "prev_owner": None,
         }
         return
@@ -74,8 +85,8 @@ def _apply(tasks: dict[str, dict], ln: dict) -> None:
                 t[k] = v
 
 
-def fold(lines: list[dict]) -> dict[str, dict]:
-    tasks: dict[str, dict] = {}
+def fold(lines: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    tasks: dict[str, dict[str, Any]] = {}
     for ln in lines:
         _apply(tasks, ln)
     for t in tasks.values():
@@ -85,35 +96,35 @@ def fold(lines: list[dict]) -> dict[str, dict]:
     return tasks
 
 
-def _load(team: Team) -> tuple[list[dict], dict[str, dict]]:
+def _load(team: Team) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     lines = store.read_jsonl(team.path("tasks.jsonl"))
     return lines, fold(lines)
 
 
-def list_tasks(team: Team) -> list[dict]:
+def list_tasks(team: Team) -> list[dict[str, Any]]:
     """All tasks in id order. Keys: id title deps priority owner desc status ready waiting_on
     created_by created updated reason handoff prev_owner."""
     return sorted(_load(team)[1].values(), key=lambda t: _num(t["id"]))
 
 
-def get(team: Team, task_id: str) -> dict | None:
+def get(team: Team, task_id: str) -> dict[str, Any] | None:
     return _load(team)[1].get(norm_id(task_id))
 
 
-def history(team: Team, task_id: str) -> list[dict]:
+def history(team: Team, task_id: str) -> list[dict[str, Any]]:
     tid = norm_id(task_id)
     return [ln for ln in store.read_jsonl(team.path("tasks.jsonl")) if ln.get("id") == tid]
 
 
 # ---------------------------------------------------------------- write helpers
-def _append(team: Team, by: str, op: str, tid: str, **fields) -> dict:
+def _append(team: Team, by: str, op: str, tid: str, **fields: Any) -> dict[str, Any]:
     ts = time.time()
     ln = {"ts": round(ts, 3), "t": store.now_iso(ts), "by": by, "op": op, "id": tid, **fields}
     store.append_jsonl(team.path("tasks.jsonl"), ln)
     return ln
 
 
-def _need(tasks: dict[str, dict], task_id: str) -> dict:
+def _need(tasks: dict[str, dict[str, Any]], task_id: str) -> dict[str, Any]:
     tid = norm_id(task_id)
     t = tasks.get(tid)
     if t is None:
@@ -121,23 +132,25 @@ def _need(tasks: dict[str, dict], task_id: str) -> dict:
     return t
 
 
-def _desc(tasks: dict[str, dict], tid: str) -> str:
+def _desc(tasks: dict[str, dict[str, Any]], tid: str) -> str:
     t = tasks.get(tid)
     if not t:
         return f"{tid} (missing)"
     return f"{tid} ({t['status']}{', ' + t['owner'] if t.get('owner') else ''})"
 
 
-def _must_be_owner_or_lead(t: dict, by: str, what: str) -> None:
+def _must_be_owner_or_lead(t: dict[str, Any], by: str, what: str) -> None:
     if is_lead(by) or by == SYSTEM or same_role(t.get("owner"), by):
         return
     if not t.get("owner"):
         raise TaskError(f"REFUSED: {t['id']} has no owner - claim it first: hermes-crew task claim {t['id']}")
-    raise TaskError(f"REFUSED: {t['id']} is owned by {t['owner']} - only {t['owner']} or lead can {what} it; "
-                    f"ask {t['owner']}: hermes-crew send {t['owner']} \"...\"")
+    raise TaskError(
+        f"REFUSED: {t['id']} is owned by {t['owner']} - only {t['owner']} or lead can {what} it; "
+        f'ask {t["owner"]}: hermes-crew send {t["owner"]} "..."'
+    )
 
 
-def _check_deps(tasks: dict[str, dict], tid: str, deps: list[str]) -> list[str]:
+def _check_deps(tasks: dict[str, dict[str, Any]], tid: str, deps: list[str]) -> list[str]:
     deps = [norm_id(d) for d in deps]
     unknown = [d for d in deps if d not in tasks]
     if unknown:
@@ -164,25 +177,32 @@ def _find_cycle(graph: dict[str, list[str]], start: str) -> list[str] | None:
         node, path = stack.pop()
         for d in graph.get(node, []):
             if d == start:
-                return path + [d]
+                return [*path, d]
             if d not in visited:
                 visited.add(d)
-                stack.append((d, path + [d]))
+                stack.append((d, [*path, d]))
     return None
 
 
-def _emit(team: Team, ln: dict) -> None:
+def _emit(team: Team, ln: dict[str, Any]) -> None:
     extra = {k: v for k, v in ln.items() if k not in ("ts", "t", "by", "op", "id")}
     events.emit(team, ln["by"], f"task.{ln['op']}", id=ln["id"], **extra)
 
 
 # ---------------------------------------------------------------- operations
-def add(team: Team, by: str, title: str, deps: list[str] | None = None, priority: int = 3,
-        owner: str | None = None, desc: str | None = None) -> dict:
+def add(
+    team: Team,
+    by: str,
+    title: str,
+    deps: list[str] | None = None,
+    priority: int = 3,
+    owner: str | None = None,
+    desc: str | None = None,
+) -> dict[str, Any]:
     """Create a task; returns it. Rejects unknown deps and cycles."""
     title = (title or "").strip()
     if not title:
-        raise TaskError("REFUSED: a task needs a title: hermes-crew task add \"<title>\"")
+        raise TaskError('REFUSED: a task needs a title: hermes-crew task add "<title>"')
     try:
         priority = int(priority)
     except (TypeError, ValueError):
@@ -204,7 +224,7 @@ def add(team: Team, by: str, title: str, deps: list[str] | None = None, priority
     return tasks[tid]
 
 
-def claim(team: Team, by: str, task_id: str) -> dict:
+def claim(team: Team, by: str, task_id: str) -> dict[str, Any]:
     with team.lock("tasks"):
         _, tasks = _load(team)
         t = _need(tasks, task_id)
@@ -213,44 +233,59 @@ def claim(team: Team, by: str, task_id: str) -> dict:
             return t
         if t["status"] not in ("open", "orphaned"):
             if t["status"] == "done":
-                raise TaskError(f"REFUSED: {tid} is already done - if it needs more work: "
-                                f"hermes-crew task reopen {tid} \"<reason>\"")
+                raise TaskError(
+                    f'REFUSED: {tid} is already done - if it needs more work: hermes-crew task reopen {tid} "<reason>"'
+                )
             raise TaskError(f"REFUSED: {tid} is {t['status']} by {t['owner']} - ask {t['owner']} or lead")
         if not t["ready"]:
             waiting = ", ".join(_desc(tasks, d) for d in t["waiting_on"])
-            raise TaskError(f"REFUSED: {tid} is not ready - waiting for {waiting}. "
-                            f"Pick a ready task (hermes-crew task list) or wait for the unblock message")
+            raise TaskError(
+                f"REFUSED: {tid} is not ready - waiting for {waiting}. "
+                f"Pick a ready task (hermes-crew task list) or wait for the unblock message"
+            )
         ln = _append(team, by, "claim", tid)
         t = fold(store.read_jsonl(team.path("tasks.jsonl")))[tid]
     _emit(team, ln)
     return t
 
 
-def assign(team: Team, by: str, task_id: str, owner: str) -> dict:
+def assign(team: Team, by: str, task_id: str, owner: str) -> dict[str, Any]:
     with team.lock("tasks"):
         _, tasks = _load(team)
         t = _need(tasks, task_id)
         if t["status"] == "done":
-            raise TaskError(f"REFUSED: {t['id']} is done - reopen it first: hermes-crew task reopen {t['id']} \"<reason>\"")
+            raise TaskError(
+                f'REFUSED: {t["id"]} is done - reopen it first: hermes-crew task reopen {t["id"]} "<reason>"'
+            )
         if t.get("owner") and not (is_lead(by) or by == SYSTEM or same_role(t["owner"], by)):
             raise TaskError(f"REFUSED: {t['id']} is owned by {t['owner']} - only {t['owner']} or lead can reassign it")
         ln = _append(team, by, "assign", t["id"], owner=owner)
         t = fold(store.read_jsonl(team.path("tasks.jsonl")))[t["id"]]
     _emit(team, ln)
     if not same_role(owner, by):
-        mailbox.send(team, SYSTEM, owner, f"{by} assigned you {t['id']} '{t['title']}'"
-                     + (f". Start with: hermes-crew task start {t['id']}" if t["ready"] else
-                        f". It waits for {', '.join(t['waiting_on'])}; you get a message when it is unblocked"))
+        mailbox.send(
+            team,
+            SYSTEM,
+            owner,
+            f"{by} assigned you {t['id']} '{t['title']}'"
+            + (
+                f". Start with: hermes-crew task start {t['id']}"
+                if t["ready"]
+                else f". It waits for {', '.join(t['waiting_on'])}; you get a message when it is unblocked"
+            ),
+        )
     return t
 
 
-def start(team: Team, by: str, task_id: str) -> dict:
+def start(team: Team, by: str, task_id: str) -> dict[str, Any]:
     with team.lock("tasks"):
         _, tasks = _load(team)
         t = _need(tasks, task_id)
         _must_be_owner_or_lead(t, by, "start")
         if not t.get("owner"):
-            raise TaskError(f"REFUSED: {t['id']} has no owner - assign it first: hermes-crew task assign {t['id']} <Role>")
+            raise TaskError(
+                f"REFUSED: {t['id']} has no owner - assign it first: hermes-crew task assign {t['id']} <Role>"
+            )
         if t["status"] == "in_progress":
             return t
         if t["status"] not in ("claimed", "blocked"):
@@ -264,9 +299,9 @@ def start(team: Team, by: str, task_id: str) -> dict:
     return t
 
 
-def block(team: Team, by: str, task_id: str, reason: str) -> dict:
+def block(team: Team, by: str, task_id: str, reason: str) -> dict[str, Any]:
     if not (reason or "").strip():
-        raise TaskError("REFUSED: say why it is blocked: hermes-crew task block <id> \"<reason>\"")
+        raise TaskError('REFUSED: say why it is blocked: hermes-crew task block <id> "<reason>"')
     with team.lock("tasks"):
         _, tasks = _load(team)
         t = _need(tasks, task_id)
@@ -279,7 +314,7 @@ def block(team: Team, by: str, task_id: str, reason: str) -> dict:
     return t
 
 
-def unblock(team: Team, by: str, task_id: str) -> dict:
+def unblock(team: Team, by: str, task_id: str) -> dict[str, Any]:
     with team.lock("tasks"):
         _, tasks = _load(team)
         t = _need(tasks, task_id)
@@ -292,13 +327,14 @@ def unblock(team: Team, by: str, task_id: str) -> dict:
     return t
 
 
-def done(team: Team, by: str, task_id: str, handoff: str | Path | None = None,
-         note: str | None = None) -> dict:
+def done(
+    team: Team, by: str, task_id: str, handoff: str | Path | None = None, note: str | None = None
+) -> dict[str, Any]:
     """Mark done. The handoff note goes to .team/handoff/<id>.md: `note` = its text, or
     `handoff` = an existing file whose text is copied (not both).
     Newly ready dependents: owner (or lead if unowned) gets a message from hermes-crew."""
     if handoff is not None and note is not None:
-        raise TaskError("REFUSED: give either --note \"<text>\" or --handoff FILE, not both")
+        raise TaskError('REFUSED: give either --note "<text>" or --handoff FILE, not both')
     if note is not None and not note.strip():
         raise TaskError("REFUSED: --note is empty - write what the next person needs to know")
     if handoff is not None and not Path(handoff).is_file():
@@ -329,9 +365,9 @@ def done(team: Team, by: str, task_id: str, handoff: str | Path | None = None,
     return after[tid]
 
 
-def handoff_text(team: Team, task: dict) -> str | None:
+def handoff_text(team: Team, task: dict[str, Any]) -> str | None:
     """Text of the task's handoff note, or None."""
-    rel = task.get("handoff")
+    rel: str | None = task.get("handoff")
     if not rel:
         return None
     try:
@@ -340,7 +376,7 @@ def handoff_text(team: Team, task: dict) -> str | None:
         return None
 
 
-def _notify_unblocked(team: Team, before: dict[str, dict], after: dict[str, dict]) -> list[str]:
+def _notify_unblocked(team: Team, before: dict[str, dict[str, Any]], after: dict[str, dict[str, Any]]) -> list[str]:
     sent = []
     for tid in sorted(after, key=_num):
         a, b = after[tid], before.get(tid)
@@ -355,9 +391,9 @@ def _notify_unblocked(team: Team, before: dict[str, dict], after: dict[str, dict
     return sent
 
 
-def reopen(team: Team, by: str, task_id: str, reason: str) -> dict:
+def reopen(team: Team, by: str, task_id: str, reason: str) -> dict[str, Any]:
     if not (reason or "").strip():
-        raise TaskError("REFUSED: say what is wrong: hermes-crew task reopen <id> \"<reason>\"")
+        raise TaskError('REFUSED: say what is wrong: hermes-crew task reopen <id> "<reason>"')
     with team.lock("tasks"):
         _, tasks = _load(team)
         t = _need(tasks, task_id)
@@ -371,7 +407,7 @@ def reopen(team: Team, by: str, task_id: str, reason: str) -> dict:
     return t
 
 
-def orphan(team: Team, by: str, task_id: str, reason: str) -> dict | None:
+def orphan(team: Team, by: str, task_id: str, reason: str) -> dict[str, Any] | None:
     """Mark an unfinished, owned task orphaned (its owner died). No-op (None) if done/unowned."""
     with team.lock("tasks"):
         _, tasks = _load(team)
@@ -390,13 +426,13 @@ def orphan_tasks_of(team: Team, by: str, role: str, reason: str) -> list[str]:
     """Orphan every unfinished task owned by `role`; returns their ids."""
     out = []
     for t in list_tasks(team):
-        if same_role(t.get("owner"), role) and t["status"] in ("claimed", "in_progress", "blocked"):
-            if orphan(team, by, t["id"], reason):
-                out.append(t["id"])
+        mine = same_role(t.get("owner"), role) and t["status"] in ("claimed", "in_progress", "blocked")
+        if mine and orphan(team, by, t["id"], reason):
+            out.append(t["id"])
     return out
 
 
-def edit(team: Team, by: str, task_id: str, **fields) -> dict:
+def edit(team: Team, by: str, task_id: str, **fields: Any) -> dict[str, Any]:
     bad = [k for k in fields if k not in EDITABLE]
     if bad:
         raise TaskError(f"REFUSED: cannot edit {', '.join(bad)} (editable: {', '.join(EDITABLE)})")
@@ -415,9 +451,9 @@ def edit(team: Team, by: str, task_id: str, **fields) -> dict:
     return t
 
 
-def unfinished(team: Team) -> list[dict]:
+def unfinished(team: Team) -> list[dict[str, Any]]:
     return [t for t in list_tasks(team) if t["status"] in UNFINISHED]
 
 
-def mine(team: Team, role: str) -> list[dict]:
+def mine(team: Team, role: str) -> list[dict[str, Any]]:
     return [t for t in list_tasks(team) if same_role(t.get("owner"), role)]

@@ -1,0 +1,2 @@
+DONE: every task is done, every owned file has an OK approval from a non-owner, all verifies pass.
+done-check exit: 0

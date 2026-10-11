@@ -10,4 +10,6 @@
 #   hermes-team-board status                                team, owners, decisions, approvals
 # An approval stores the file's sha256; if the file changes later the approval shows STALE.
 # Thin wrapper: the implementation is `hermes-crew board` (same log format and output).
-exec "$(dirname "$(readlink -f "$0")")/hermes-crew" board "$@"
+# real dir of this script, symlinks resolved portably (plain readlink: the GNU-only flag is missing on macOS)
+_s=$0; while [ -L "$_s" ]; do _l=$(readlink "$_s"); case $_l in /*) _s=$_l ;; *) _s=$(dirname "$_s")/$_l ;; esac; done; HT_BIN=$(cd "$(dirname "$_s")" && pwd -P)
+exec "$HT_BIN/hermes-crew" board "$@"

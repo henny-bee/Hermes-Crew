@@ -5,12 +5,15 @@ claim   = rename new/ -> cur/  (atomic; whoever renames first owns the delivery)
 unclaim = rename cur/ -> new/  (delivery failed, retry later)
 expire  = new/ -> expired/ after ttl_s, and the sender is told
 """
+
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
 import time
 from pathlib import Path
+from typing import Any
 
 from . import events, store
 from .team import SYSTEM, Team
@@ -46,14 +49,23 @@ def short_id(msg_id: str) -> str:
     return msg_id.rsplit("-", 1)[-1]
 
 
-def send(team: Team, sender: str, to: str, body: str, reply_to: str | None = None,
-         ttl_s: int = DEFAULT_TTL) -> dict:
+def send(
+    team: Team, sender: str, to: str, body: str, reply_to: str | None = None, ttl_s: int = DEFAULT_TTL
+) -> dict[str, Any]:
     """Queue `body` for `to`. Returns the message dict. Emits `msg.queued`."""
     b = _ensure(team, to)
     ts = time.time()
     mid = new_id(sender)
-    msg = {"id": mid, "from": sender, "to": b.name, "sent_at": store.now_iso(ts), "ts": round(ts, 6),
-           "body": body, "reply_to": reply_to, "ttl_s": int(ttl_s)}
+    msg = {
+        "id": mid,
+        "from": sender,
+        "to": b.name,
+        "sent_at": store.now_iso(ts),
+        "ts": round(ts, 6),
+        "body": body,
+        "reply_to": reply_to,
+        "ttl_s": int(ttl_s),
+    }
     tmp = b / "tmp" / f"{mid}.json"
     tmp.write_text(store.dumps(msg) + "\n", encoding="utf-8")
     os.rename(tmp, b / "new" / f"{mid}.json")
@@ -61,12 +73,12 @@ def send(team: Team, sender: str, to: str, body: str, reply_to: str | None = Non
     return msg
 
 
-def _load(p: Path) -> dict | None:
+def _load(p: Path) -> dict[str, Any] | None:
     m = store.read_json(p)
     return m if isinstance(m, dict) else None
 
 
-def pending(team: Team, role: str) -> list[dict]:
+def pending(team: Team, role: str) -> list[dict[str, Any]]:
     """Messages waiting in new/, oldest first."""
     d = box(team, role) / "new"
     if not d.is_dir():
@@ -83,15 +95,13 @@ def _seen(b: Path, mid: str) -> bool:
     return (b / "cur" / f"{mid}.json").exists() or (b / "expired" / f"{mid}.json").exists()
 
 
-def claim(team: Team, role: str, msg_id: str) -> dict | None:
+def claim(team: Team, role: str, msg_id: str) -> dict[str, Any] | None:
     """Atomically move one message new/ -> cur/. None if someone else got it or it is a duplicate."""
     b = box(team, role)
     src = b / "new" / f"{msg_id}.json"
-    if _seen(b, msg_id):          # dedup: already delivered or expired -> never again
-        try:
+    if _seen(b, msg_id):  # dedup: already delivered or expired -> never again
+        with contextlib.suppress(FileNotFoundError):
             src.unlink()
-        except FileNotFoundError:
-            pass
         return None
     dst = b / "cur" / f"{msg_id}.json"
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -108,14 +118,13 @@ def claim(team: Team, role: str, msg_id: str) -> dict | None:
         except OSError:
             return None
         return _load(dst)
-    try:
+    # a concurrent dedup check may have removed src; our link created dst, so it is ours
+    with contextlib.suppress(FileNotFoundError):
         os.unlink(src)
-    except FileNotFoundError:
-        pass            # a concurrent dedup check removed src; our link created dst, so it is ours
     return _load(dst)
 
 
-def claim_all(team: Team, role: str) -> list[dict]:
+def claim_all(team: Team, role: str) -> list[dict[str, Any]]:
     """Claim every pending message (oldest first); returns the ones this caller got."""
     got = []
     for m in pending(team, role):
@@ -135,13 +144,13 @@ def unclaim(team: Team, role: str, msg_id: str) -> bool:
         return False
 
 
-def mark_delivered(team: Team, role: str, msgs: list[dict]) -> None:
+def mark_delivered(team: Team, role: str, msgs: list[dict[str, Any]]) -> None:
     """Emit one `msg.delivered` event per message (role = recipient)."""
     for m in msgs:
         events.emit(team, role, "msg.delivered", id=m["id"], **{"from": m.get("from")})
 
 
-def delivered(team: Team, role: str, n: int = 20) -> list[dict]:
+def delivered(team: Team, role: str, n: int = 20) -> list[dict[str, Any]]:
     """The last `n` delivered messages (cur/), oldest first."""
     d = box(team, role) / "cur"
     if not d.is_dir():
@@ -150,12 +159,12 @@ def delivered(team: Team, role: str, n: int = 20) -> list[dict]:
     return [m for m in (_load(f) for f in files) if m]
 
 
-def expired_msgs(team: Team, role: str) -> list[dict]:
+def expired_msgs(team: Team, role: str) -> list[dict[str, Any]]:
     d = box(team, role) / "expired"
     return [m for m in (_load(f) for f in sorted(d.glob("*.json"))) if m] if d.is_dir() else []
 
 
-def expire(team: Team, now: float | None = None) -> list[dict]:
+def expire(team: Team, now: float | None = None) -> list[dict[str, Any]]:
     """Move messages older than their ttl_s from new/ to expired/; tell each sender. Returns them."""
     now = time.time() if now is None else now
     root = team.path("mail")
@@ -178,20 +187,25 @@ def expire(team: Team, now: float | None = None) -> list[dict]:
             try:
                 os.rename(f, b / "expired" / f.name)
             except OSError:
-                continue            # delivered/claimed meanwhile
+                continue  # delivered/claimed meanwhile
             gone.append(m)
             events.emit(team, SYSTEM, "msg.expired", id=m["id"], to=b.name, **{"from": m.get("from")})
             sender = str(m.get("from") or "")
             if sender and sender.lower() not in (SYSTEM, "user"):
-                send(team, SYSTEM, sender,
-                     f"your message #{short_id(m['id'])} to {b.name} expired undelivered after "
-                     f"{int(ttl)} s ({b.name} never became idle): {_clip(str(m.get('body', '')), 120)}")
+                send(
+                    team,
+                    SYSTEM,
+                    sender,
+                    f"your message #{short_id(m['id'])} to {b.name} expired undelivered after "
+                    f"{int(ttl)} s ({b.name} never became idle): {_clip(str(m.get('body', '')), 120)}",
+                )
     return gone
 
 
-def render(msgs: list[dict]) -> str:
+def render(msgs: list[dict[str, Any]]) -> str:
     """The text injected into the recipient's session for a batch of messages."""
-    def block(m: dict) -> str:
+
+    def block(m: dict[str, Any]) -> str:
         t = str(m.get("sent_at", ""))[11:19]
         return f"[from {m.get('from')} sent {t} · #{short_id(str(m.get('id', '')))}] {m.get('body', '')}"
 

@@ -1,0 +1,255 @@
+diff --git a/app.py b/app.py
+index abb59b9..bb53474 100755
+--- a/app.py
++++ b/app.py
+@@ -1,14 +1,48 @@
+-import configparser
++import json
++import os
+ 
++DEFAULT_CONFIG = {
++    "host": "127.0.0.1",
++    "port": 8000,
++    "db_url": "sqlite:///app.db",
++    "debug": False,
++}
++
++
++def load_config(path="config.json"):
++    if not os.path.exists(path):
++        return dict(DEFAULT_CONFIG)
++    try:
++        with open(path, "r", encoding="utf-8") as f:
++            data = json.load(f)
++    except Exception:
++        return dict(DEFAULT_CONFIG)
++
++    if not isinstance(data, dict):
++        return dict(DEFAULT_CONFIG)
++
++    host = data.get("host", DEFAULT_CONFIG["host"])
++    port = data.get("port", DEFAULT_CONFIG["port"])
++    try:
++        port = int(port)
++    except (ValueError, TypeError):
++        port = DEFAULT_CONFIG["port"]
++
++    db_url = data.get("db_url", DEFAULT_CONFIG["db_url"])
++    debug = data.get("debug", DEFAULT_CONFIG["debug"])
++    if not isinstance(debug, bool):
++        if isinstance(debug, str):
++            debug = debug.lower() in ("true", "1", "yes", "on")
++        elif isinstance(debug, (int, float)):
++            debug = bool(debug)
++        else:
++            debug = DEFAULT_CONFIG["debug"]
+ 
+-def load_config(path="config.ini"):
+-    cp = configparser.ConfigParser()
+-    cp.read(path)
+     return {
+-        "host": cp.get("server", "host", fallback="127.0.0.1"),
+-        "port": cp.getint("server", "port", fallback=8000),
+-        "db_url": cp.get("database", "url", fallback="sqlite:///app.db"),
+-        "debug": cp.getboolean("server", "debug", fallback=False),
++        "host": str(host) if host is not None else DEFAULT_CONFIG["host"],
++        "port": port,
++        "db_url": str(db_url) if db_url is not None else DEFAULT_CONFIG["db_url"],
++        "debug": debug,
+     }
+ 
+ 
+diff --git a/config.json b/config.json
+new file mode 100644
+index 0000000..50ff53c
+--- /dev/null
++++ b/config.json
+@@ -0,0 +1,6 @@
++{
++  "host": "0.0.0.0",
++  "port": 9090,
++  "db_url": "postgresql://app@db.internal/app",
++  "debug": true
++}
+diff --git a/migrate_config.py b/migrate_config.py
+new file mode 100644
+index 0000000..1737c46
+--- /dev/null
++++ b/migrate_config.py
+@@ -0,0 +1,42 @@
++import configparser
++import json
++import os
++import sys
++
++
++def parse_ini_config(ini_path="config.ini"):
++    cp = configparser.ConfigParser()
++    if not cp.read(ini_path):
++        # Even if file is missing/empty, fallbacks should be respected if section/key missing
++        pass
++    return {
++        "host": cp.get("server", "host", fallback="127.0.0.1"),
++        "port": cp.getint("server", "port", fallback=8000),
++        "db_url": cp.get("database", "url", fallback="sqlite:///app.db"),
++        "debug": cp.getboolean("server", "debug", fallback=False),
++    }
++
++
++def migrate(ini_path="config.ini", json_path="config.json"):
++    if os.path.exists(json_path):
++        raise FileExistsError(f"Target file already exists: {json_path}")
++    data = parse_ini_config(ini_path)
++    with open(json_path, "w", encoding="utf-8") as f:
++        json.dump(data, f, indent=2)
++        f.write("\n")
++    return data
++
++
++def main():
++    ini_path = sys.argv[1] if len(sys.argv) > 1 else "config.ini"
++    json_path = sys.argv[2] if len(sys.argv) > 2 else "config.json"
++    try:
++        data = migrate(ini_path, json_path)
++        print(f"Migrated configuration from {ini_path} to {json_path}: {data}")
++    except FileExistsError as e:
++        print(f"Error: {e}", file=sys.stderr)
++        sys.exit(1)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/test_migration.py b/tests/test_migration.py
+new file mode 100644
+index 0000000..7eff6d9
+--- /dev/null
++++ b/tests/test_migration.py
+@@ -0,0 +1,128 @@
++import json
++import os
++import shutil
++import tempfile
++import unittest
++
++import app
++import migrate_config
++
++
++class TestConfigMigration(unittest.TestCase):
++    def setUp(self):
++        self.test_dir = tempfile.mkdtemp()
++
++    def tearDown(self):
++        shutil.rmtree(self.test_dir)
++
++    def test_migrate_config_success(self):
++        ini_content = """[server]
++host = 192.168.1.10
++port = 5000
++debug = yes
++
++[database]
++url = postgresql://user:pass@localhost:5432/testdb
++"""
++        ini_path = os.path.join(self.test_dir, "test.ini")
++        json_path = os.path.join(self.test_dir, "test.json")
++
++        with open(ini_path, "w", encoding="utf-8") as f:
++            f.write(ini_content)
++
++        data = migrate_config.migrate(ini_path, json_path)
++
++        self.assertTrue(os.path.exists(json_path))
++        self.assertEqual(data["host"], "192.168.1.10")
++        self.assertEqual(data["port"], 5000)
++        self.assertIsInstance(data["port"], int)
++        self.assertEqual(data["db_url"], "postgresql://user:pass@localhost:5432/testdb")
++        self.assertIs(data["debug"], True)
++
++        with open(json_path, "r", encoding="utf-8") as f:
++            loaded = json.load(f)
++        self.assertEqual(loaded, data)
++
++    def test_migrate_config_does_not_overwrite(self):
++        ini_path = os.path.join(self.test_dir, "test.ini")
++        json_path = os.path.join(self.test_dir, "test.json")
++
++        with open(ini_path, "w", encoding="utf-8") as f:
++            f.write("[server]\nhost = 127.0.0.1\n")
++
++        with open(json_path, "w", encoding="utf-8") as f:
++            f.write('{"existing": true}')
++
++        with self.assertRaises(FileExistsError):
++            migrate_config.migrate(ini_path, json_path)
++
++        with open(json_path, "r", encoding="utf-8") as f:
++            content = f.read()
++        self.assertEqual(content, '{"existing": true}')
++
++    def test_migrate_defaults_when_ini_empty(self):
++        ini_path = os.path.join(self.test_dir, "empty.ini")
++        json_path = os.path.join(self.test_dir, "empty.json")
++
++        with open(ini_path, "w", encoding="utf-8") as f:
++            f.write("")
++
++        data = migrate_config.migrate(ini_path, json_path)
++        self.assertEqual(
++            data,
++            {
++                "host": "127.0.0.1",
++                "port": 8000,
++                "db_url": "sqlite:///app.db",
++                "debug": False,
++            },
++        )
++
++    def test_app_load_config_json(self):
++        json_path = os.path.join(self.test_dir, "app_config.json")
++        cfg_data = {
++            "host": "0.0.0.0",
++            "port": 9000,
++            "db_url": "mysql://root@db/main",
++            "debug": True,
++        }
++        with open(json_path, "w", encoding="utf-8") as f:
++            json.dump(cfg_data, f)
++
++        loaded = app.load_config(json_path)
++        self.assertEqual(loaded, cfg_data)
++        self.assertIsInstance(loaded["port"], int)
++        self.assertIsInstance(loaded["debug"], bool)
++
++    def test_app_load_config_defaults_missing_file(self):
++        missing_path = os.path.join(self.test_dir, "nonexistent.json")
++        loaded = app.load_config(missing_path)
++        self.assertEqual(
++            loaded,
++            {
++                "host": "127.0.0.1",
++                "port": 8000,
++                "db_url": "sqlite:///app.db",
++                "debug": False,
++            },
++        )
++
++    def test_app_load_config_defaults_missing_keys(self):
++        json_path = os.path.join(self.test_dir, "partial.json")
++        with open(json_path, "w", encoding="utf-8") as f:
++            json.dump({"host": "10.0.0.1"}, f)
++
++        loaded = app.load_config(json_path)
++        self.assertEqual(
++            loaded,
++            {
++                "host": "10.0.0.1",
++                "port": 8000,
++                "db_url": "sqlite:///app.db",
++                "debug": False,
++            },
++        )
++
++
++if __name__ == "__main__":
++    unittest.main()

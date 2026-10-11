@@ -5,6 +5,7 @@ on_session_start (first turn only) → pre_llm_call → [pre_tool_call]* → pos
 on_session_end; clarify → on_human_input_request … on_human_input_resolved; Ctrl+C →
 on_session_end(completed=False, interrupted=True, turn_exit_reason="interrupted_by_user").
 """
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,7 @@ import os
 import threading
 
 import pytest
-
+from hermes_crew import __version__
 from plugin_fake import FakeCtx, load_plugin
 
 TURN = "20261009_150607_da1d4b:20261009_150607_da1d4b:{}"
@@ -66,8 +67,13 @@ def first_turn(ctx, n="1c940174"):
 
 def end_turn(ctx, n="1c940174", **kw):
     ctx.fire("post_llm_call", turn_id=TURN.format(n))
-    args = dict(completed=True, interrupted=False, failed=False,
-                turn_exit_reason="text_response(finish_reason=stop)", turn_id=TURN.format(n))
+    args = {
+        "completed": True,
+        "interrupted": False,
+        "failed": False,
+        "turn_exit_reason": "text_response(finish_reason=stop)",
+        "turn_id": TURN.format(n),
+    }
     args.update(kw)
     ctx.fire("on_session_end", **args)
 
@@ -94,7 +100,7 @@ def test_register_writes_starting_and_hooks(crew, P):
     plugin, ctx, _ = crew
     r = rec(plugin)
     assert r["state"] == "starting" and r["pid"] == os.getpid()
-    assert r["plugin_version"] == "3.0.0" and r["heartbeat"]
+    assert r["plugin_version"] == __version__ and r["heartbeat"]
     assert set(ctx.hooks) == set(P.CrewPlugin.HOOKS)
     assert (plugin.team.dir / ".gitignore").read_text() == "*\n"
     assert plugin.threads == []
@@ -112,11 +118,19 @@ def test_turn_lifecycle_like_spike(crew):
     plugin, ctx, _ = crew
     ctx.fire("on_session_start", session_id="s1", model="m1", platform="cli")
     assert rec(plugin)["state"] == "idle"
-    assert ctx.fire("pre_llm_call", turn_id=TURN.format("a")) is None   # must not inject context
+    assert ctx.fire("pre_llm_call", turn_id=TURN.format("a")) is None  # must not inject context
     r = rec(plugin)
     assert r["state"] == "busy" and r["turn_id"] == TURN.format("a")
-    assert ctx.fire("pre_tool_call", tool_name="terminal", args={"command": "sleep 12 && echo SLEPT"},
-                    task_id="", session_id="s1") is None
+    assert (
+        ctx.fire(
+            "pre_tool_call",
+            tool_name="terminal",
+            args={"command": "sleep 12 && echo SLEPT"},
+            task_id="",
+            session_id="s1",
+        )
+        is None
+    )
     end_turn(ctx, "a")
     r = rec(plugin)
     assert r["state"] == "idle" and r["turns"] == 1 and r["last_error"] is None
@@ -126,7 +140,7 @@ def test_turn_lifecycle_like_spike(crew):
 
 def test_session_start_after_turn_does_not_reset(crew):
     plugin, ctx, _ = crew
-    ctx.fire("pre_llm_call", turn_id="t")      # resumed session: no on_session_start
+    ctx.fire("pre_llm_call", turn_id="t")  # resumed session: no on_session_start
     ctx.fire("on_session_start", session_id="s", model="m")
     assert rec(plugin)["state"] == "busy"
 
@@ -135,8 +149,15 @@ def test_human_input_blocks_and_resolves(crew):
     plugin, ctx, _ = crew
     first_turn(ctx)
     ctx.fire("pre_tool_call", tool_name="clarify", args={"questions": []})
-    ctx.fire("on_human_input_request", kind="clarify", request_id="r1", session_id="s",
-             session_key="k", platform="cli", prompt="Which color?")
+    ctx.fire(
+        "on_human_input_request",
+        kind="clarify",
+        request_id="r1",
+        session_id="s",
+        session_key="k",
+        platform="cli",
+        prompt="Which color?",
+    )
     r = rec(plugin)
     assert r["state"] == "blocked" and r["blocked_kind"] == "clarify"
     ctx.fire("on_human_input_resolved", kind="clarify", request_id="r1", outcome="submitted")
@@ -149,8 +170,14 @@ def test_human_input_blocks_and_resolves(crew):
 def test_interrupted_turn(crew):
     plugin, ctx, _ = crew
     first_turn(ctx)
-    ctx.fire("on_session_end", completed=False, interrupted=True, failed=False,
-             turn_exit_reason="interrupted_by_user", turn_id=TURN.format("1c940174"))
+    ctx.fire(
+        "on_session_end",
+        completed=False,
+        interrupted=True,
+        failed=False,
+        turn_exit_reason="interrupted_by_user",
+        turn_id=TURN.format("1c940174"),
+    )
     r = rec(plugin)
     assert r["state"] == "idle" and r["last_error"] is None
     [e] = evs(plugin, "turn.interrupted")
@@ -160,8 +187,14 @@ def test_interrupted_turn(crew):
 def test_failed_turn_sets_last_error_and_event(crew):
     plugin, ctx, _ = crew
     first_turn(ctx)
-    ctx.fire("api_request_error", status_code=500, retryable=False, reason="server_error",
-             error={"type": "APIError", "message": "upstream exploded\nbadly"}, turn_id="t")
+    ctx.fire(
+        "api_request_error",
+        status_code=500,
+        retryable=False,
+        reason="server_error",
+        error={"type": "APIError", "message": "upstream exploded\nbadly"},
+        turn_id="t",
+    )
     assert rec(plugin)["last_error"] == "HTTP 500 APIError: upstream exploded badly"
     assert rec(plugin)["state"] == "busy"
     end_turn(ctx, completed=False, failed=True, turn_exit_reason="api_error")
@@ -184,9 +217,20 @@ def test_usage_tokens_accumulate(crew):
     plugin, ctx, _ = crew
     first_turn(ctx)
     # real Hermes: CanonicalUsage asdict + prompt_tokens (= input + cache) + total_tokens
-    ctx.fire("post_api_request", usage={"input_tokens": 100, "output_tokens": 20, "cache_read_tokens": 900,
-                                        "cache_write_tokens": 0, "reasoning_tokens": 0, "request_count": 1,
-                                        "prompt_tokens": 1000, "total_tokens": 1020}, model="m")
+    ctx.fire(
+        "post_api_request",
+        usage={
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "cache_read_tokens": 900,
+            "cache_write_tokens": 0,
+            "reasoning_tokens": 0,
+            "request_count": 1,
+            "prompt_tokens": 1000,
+            "total_tokens": 1020,
+        },
+        model="m",
+    )
     ctx.fire("post_api_request", usage={"input_tokens": 5, "output_tokens": 7})
     ctx.fire("post_api_request", usage={"prompt_tokens": 3, "completion_tokens": 4})
     ctx.fire("post_api_request", usage=None)
@@ -207,7 +251,7 @@ def test_finalize_marks_exited(crew):
     hb = rec(plugin)["heartbeat"]
     plugin.heartbeat_tick()
     assert rec(plugin)["heartbeat"] == hb
-    ctx.fire("on_session_end", completed=False, interrupted=True)   # CLI exit-handler shape
+    ctx.fire("on_session_end", completed=False, interrupted=True)  # CLI exit-handler shape
     assert rec(plugin)["state"] == "exited"
 
 
@@ -245,13 +289,25 @@ def test_hooks_never_raise(crew, P, monkeypatch):
 
     def boom(*a, **k):
         raise OSError("disk full")
+
     monkeypatch.setattr(P.state, "update", boom)
     monkeypatch.setattr(P.state, "read", boom)
     monkeypatch.setattr(P.state, "add_tokens", boom)
     monkeypatch.setattr(P.events, "emit", boom)
     for name in P.CrewPlugin.HOOKS:
-        assert ctx.fire(name, tool_name="write_file", args={"path": "x"}, usage={"input_tokens": 1},
-                        kind="clarify", failed=True, interrupted=True, result="{}") is None, name
+        assert (
+            ctx.fire(
+                name,
+                tool_name="write_file",
+                args={"path": "x"},
+                usage={"input_tokens": 1},
+                kind="clarify",
+                failed=True,
+                interrupted=True,
+                result="{}",
+            )
+            is None
+        ), name
     assert plugin.mail_tick() == 0
     plugin.heartbeat_tick()
 
@@ -260,25 +316,25 @@ def test_hooks_never_raise(crew, P, monkeypatch):
 def test_no_delivery_while_starting_until_first_turn(crew, P):
     plugin, ctx, clock = crew
     send(P, plugin, "lead", "early")
-    assert plugin.mail_tick() == 0                     # starting
+    assert plugin.mail_tick() == 0  # starting
     ctx.fire("on_session_start", session_id="s", model="m")
     clock.t += 1
-    assert plugin.mail_tick() == 0                     # idle, but the brief turn has not begun
+    assert plugin.mail_tick() == 0  # idle, but the brief turn has not begun
     ctx.fire("pre_llm_call", turn_id="brief")
-    assert plugin.mail_tick() == 0                     # busy
+    assert plugin.mail_tick() == 0  # busy
     end_turn(ctx, "brief")
     assert plugin.mail_tick() == 1
     assert ctx.injected and "early" in ctx.injected[0]
 
 
 def test_startup_grace_30s_without_any_turn(crew, P):
-    plugin, ctx, clock = crew
+    plugin, _ctx, clock = crew
     send(P, plugin, "lead", "hello")
     clock.t += 29
     assert plugin.mail_tick() == 0
     assert rec(plugin)["state"] == "starting"
     clock.t += 2
-    assert plugin.mail_tick() == 1                     # resumed session, no turn: idle after grace
+    assert plugin.mail_tick() == 1  # resumed session, no turn: idle after grace
     assert rec(plugin)["state"] == "idle"
 
 
@@ -316,8 +372,9 @@ def test_single_message_format(crew, P):
     assert plugin.mail_tick() == 1
     [text] = ctx.injected
     short = m["id"].rsplit("-", 1)[-1]
-    assert text.startswith(f"[from Tester sent {m['sent_at'][11:19]} · #{short}] "
-                           "please run 'make test' && report $(date)")
+    assert text.startswith(
+        f"[from Tester sent {m['sent_at'][11:19]} · #{short}] please run 'make test' && report $(date)"
+    )
     assert text.endswith('(reply: hermes-crew send Tester "...")')
     [e] = evs(plugin, "msg.delivered")
     assert e["id"] == m["id"] and e["role"] == "Coder"
@@ -328,7 +385,7 @@ def test_batches_all_pending_into_one_injection(crew, P):
     plugin, ctx, _ = crew
     first_turn(ctx)
     ids = [send(P, plugin, s, f"body {i}")["id"] for i, s in enumerate(["Tester", "lead", "Tester"])]
-    assert plugin.mail_tick() == 0                     # still busy
+    assert plugin.mail_tick() == 0  # still busy
     end_turn(ctx)
     assert plugin.mail_tick() == 3
     [text] = ctx.injected
@@ -361,7 +418,7 @@ def test_unclaim_when_inject_refused_then_retry(crew, P):
     assert plugin.mail_tick() == 1
     assert len(ctx.injected) == 1 and "retry me" in ctx.injected[0]
     clock.t += 1
-    assert plugin.mail_tick() == 0                     # never twice
+    assert plugin.mail_tick() == 0  # never twice
 
 
 def test_unclaim_when_inject_raises(crew, P):
@@ -382,7 +439,7 @@ def test_no_second_inject_before_injected_turn_starts(crew, P):
     assert plugin.mail_tick() == 1
     send(P, plugin, "Tester", "two")
     clock.t += 1
-    assert plugin.mail_tick() == 0                     # injected turn not started yet
+    assert plugin.mail_tick() == 0  # injected turn not started yet
     ctx.fire("pre_llm_call", turn_id="injected")
     end_turn(ctx, "injected")
     clock.t += 1
@@ -397,7 +454,7 @@ def test_inject_settle_timeout(crew, P):
     send(P, plugin, "Tester", "one")
     plugin.mail_tick()
     send(P, plugin, "Tester", "two")
-    clock.t += 31                                      # injected turn never showed up
+    clock.t += 31  # injected turn never showed up
     assert plugin.mail_tick() == 1
 
 
@@ -457,3 +514,70 @@ def test_teammate_has_no_watchdog_thread(P, monkeypatch, tmp_path):
         assert sorted(t.name for t in plugin.threads) == ["hermes-crew-heartbeat", "hermes-crew-mail"]
     finally:
         plugin.stop.set()
+
+
+# ---------------------------------------------------------------- degraded mode (hook-presence probe)
+def test_degraded_empty_with_a_complete_hermes(crew):
+    plugin, _ctx, _ = crew
+    assert plugin.degraded == [] and rec(plugin)["plugin_degraded"] == []
+    assert evs(plugin, "plugin.degraded") == []
+
+
+def test_degraded_records_missing_hooks_once(tmp_path, monkeypatch, P, caplog):
+    import sys
+    import types
+
+    class OldHermesCtx(FakeCtx):
+        def register_hook(self, name, callback):
+            if name == "on_human_input_request":
+                raise ValueError("unknown hook")
+            super().register_hook(name, callback)
+
+    (tmp_path / "proj").mkdir()
+    monkeypatch.setenv("HERMES_TEAM_DIR", str(tmp_path / "proj"))
+    monkeypatch.setenv("HERMES_TEAM_ROLE", "Coder")
+    fake_plugins_mod = types.SimpleNamespace(VALID_HOOKS=set(P.CrewPlugin.HOOKS) - {"post_tool_call"})
+    monkeypatch.setitem(sys.modules, "hermes_cli.plugins", fake_plugins_mod)  # where Hermes defines it
+    ctx = OldHermesCtx()
+    with caplog.at_level("WARNING", logger="hermes_crew"):
+        plugin = P.register(ctx, start_threads=False)
+    assert plugin is not None and plugin.degraded == ["on_human_input_request", "post_tool_call"]
+    assert rec(plugin)["plugin_degraded"] == ["on_human_input_request", "post_tool_call"]
+    assert [e["missing"] for e in evs(plugin, "plugin.degraded")] == [plugin.degraded]
+    warnings = [r for r in caplog.records if "degraded" in r.getMessage()]
+    assert len(warnings) == 1 and "on_human_input_request, post_tool_call" in warnings[0].getMessage()
+    assert "pre_tool_call" in ctx.hooks and "on_human_input_request" not in ctx.hooks  # the rest still works
+    plugin.heartbeat_tick()
+    assert rec(plugin)["plugin_degraded"] == plugin.degraded  # kept by later state writes
+
+
+def test_degraded_without_inject_message_keeps_mail_pending(tmp_path, monkeypatch, P):
+    class NoInjectCtx:
+        def __init__(self):
+            self.hooks = {}
+
+        def register_hook(self, name, callback):
+            self.hooks[name] = callback
+
+    (tmp_path / "proj").mkdir()
+    monkeypatch.setenv("HERMES_TEAM_DIR", str(tmp_path / "proj"))
+    monkeypatch.setenv("HERMES_TEAM_ROLE", "Coder")
+    plugin = P.register(NoInjectCtx(), start_threads=False)
+    assert plugin.degraded == ["inject_message"]
+    plugin._set("idle")
+    plugin.turn_seen = True
+    send(P, plugin, "lead", "hello")
+    assert plugin.mail_tick() == 0 and len(P.mailbox.pending(plugin.team, "Coder")) == 1
+
+
+def test_degraded_shown_by_status(crew, P):
+    from hermes_crew import status
+
+    plugin, _ctx, _ = crew
+    P.state.update(plugin.team, "Coder", plugin_degraded=["inject_message"])
+    m = status.model(plugin.team)
+    assert [a["plugin_degraded"] for a in m["agents"] if a["role"] == "Coder"] == [["inject_message"]]
+    out = status.render(m, width=120)
+    assert "WARN Coder: plugin degraded, Hermes lacks inject_message" in out
+    P.state.update(plugin.team, "Coder", plugin_degraded=[])
+    assert "WARN" not in status.render(status.model(plugin.team), width=120)

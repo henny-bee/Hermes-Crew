@@ -1,0 +1,186 @@
+{
+ "team": "/tmp/example/proj",
+ "time": "2026-10-11T02:30:26",
+ "agents": [
+  {
+   "role": "lead",
+   "pid": 166321,
+   "pane": "%0",
+   "model": "claude-fable-5-1",
+   "session": "ex",
+   "state": "idle",
+   "since": 1791678561.9871745,
+   "turn_id": "20261011_022807_16203f:20261011_022807_16203f:ece1e8a3",
+   "task": null,
+   "blocked_kind": null,
+   "last_error": null,
+   "tokens_in": 223950,
+   "tokens_out": 885,
+   "turns": 3,
+   "heartbeat": 1791678621.458407,
+   "started": 1791678486.4371204,
+   "plugin_version": "3.0.0",
+   "plugin_degraded": [],
+   "session_id": "20261011_022807_16203f",
+   "alive": true,
+   "dead": false,
+   "for_s": 64.2
+  },
+  {
+   "role": "Engineer",
+   "pid": 166571,
+   "pane": "%1",
+   "model": "claude-fable-5-1",
+   "session": "ex",
+   "state": "idle",
+   "since": 1791678566.6665025,
+   "turn_id": "20261011_022817_4ef2e2:20261011_022817_4ef2e2:bed937f5",
+   "task": null,
+   "blocked_kind": null,
+   "last_error": null,
+   "tokens_in": 348397,
+   "tokens_out": 1199,
+   "turns": 3,
+   "heartbeat": 1791678617.4324577,
+   "started": 1791678497.4200246,
+   "plugin_version": "3.0.0",
+   "plugin_degraded": [],
+   "session_id": "20261011_022817_4ef2e2",
+   "alive": true,
+   "dead": false,
+   "for_s": 59.5
+  },
+  {
+   "role": "Reviewer",
+   "pid": 166712,
+   "pane": "%2",
+   "model": "claude-fable-5-1",
+   "session": "ex",
+   "state": "idle",
+   "since": 1791678563.5065124,
+   "turn_id": "20261011_022819_8c5dfb:20261011_022819_8c5dfb:93bdb80b",
+   "task": null,
+   "blocked_kind": null,
+   "last_error": null,
+   "tokens_in": 269591,
+   "tokens_out": 770,
+   "turns": 4,
+   "heartbeat": 1791678619.4316354,
+   "started": 1791678499.4195573,
+   "plugin_version": "3.0.0",
+   "plugin_degraded": [],
+   "session_id": "20261011_022819_8c5dfb",
+   "alive": true,
+   "dead": false,
+   "for_s": 62.7
+  }
+ ],
+ "tasks": [
+  {
+   "id": "T1",
+   "title": "Write README.md with wordfreq usage and verified example",
+   "deps": [],
+   "priority": 3,
+   "owner": "Engineer",
+   "desc": "Owns README.md. Read wordfreq.py, inspect python wordfreq.py --help, document what it does, how to run it with real options, and include one example with real output. Run example through hermes-crew verify. Request review from Reviewer.",
+   "status": "done",
+   "created_by": "lead",
+   "created": "2026-10-11T02:28:19",
+   "updated": "2026-10-11T02:28:56",
+   "reason": null,
+   "handoff": ".team/handoff/T1.md",
+   "prev_owner": null,
+   "waiting_on": [],
+   "ready": true,
+   "verify": {
+    "exit": 0,
+    "cmd": "python3 wordfreq.py -i --top 5 sample.txt",
+    "t": "2026-10-11T02:28:45",
+    "by": "Engineer",
+    "duration_s": 0.039
+   }
+  },
+  {
+   "id": "T2",
+   "title": "Review and approve README.md",
+   "deps": [
+    "T1"
+   ],
+   "priority": 3,
+   "owner": "Reviewer",
+   "desc": "Check README.md against real behavior of wordfreq.py by running it yourself. Approve via hermes-crew board approve README.md or send Engineer fixes.",
+   "status": "done",
+   "created_by": "lead",
+   "created": "2026-10-11T02:28:21",
+   "updated": "2026-10-11T02:29:14",
+   "reason": null,
+   "handoff": ".team/handoff/T2.md",
+   "prev_owner": null,
+   "waiting_on": [],
+   "ready": true,
+   "verify": {
+    "exit": 0,
+    "cmd": "python3 wordfreq.py -i --top 5 sample.txt",
+    "t": "2026-10-11T02:29:10",
+    "by": "Reviewer",
+    "duration_s": 0.044
+   }
+  }
+ ],
+ "files": [
+  {
+   "file": "README.md",
+   "owner": "Engineer",
+   "hash": "deb10d52bebf",
+   "approvals": [
+    {
+     "role": "Reviewer",
+     "hash": "deb10d52bebf",
+     "evidence": "Verified CLI arguments, regex tokenization, default top 10, case sensitivity vs -i flag, stdin and file execution against wordfreq.py behavior and sample.txt",
+     "time": "2026-10-11T02:29:12",
+     "status": "OK"
+    }
+   ],
+   "ok": true
+  }
+ ],
+ "decisions": [],
+ "done_check": [],
+ "metrics": {
+  "tasks": {
+   "T1": {
+    "claimed": "2026-10-11T02:28:19",
+    "done": "2026-10-11T02:28:56",
+    "wall_s": 36.2,
+    "reopens": 0
+   },
+   "T2": {
+    "claimed": "2026-10-11T02:28:21",
+    "done": "2026-10-11T02:29:14",
+    "wall_s": 52.4,
+    "reopens": 0
+   }
+  },
+  "roles": {
+   "lead": {
+    "tokens_in": 223950,
+    "tokens_out": 885
+   },
+   "Engineer": {
+    "tokens_in": 348397,
+    "tokens_out": 1199
+   },
+   "Reviewer": {
+    "tokens_in": 269591,
+    "tokens_out": 770
+   }
+  },
+  "totals": {
+   "tasks_timed": 2,
+   "wall_s": 88.6,
+   "reopens": 0,
+   "tokens_in": 841938,
+   "tokens_out": 2854
+  }
+ }
+}

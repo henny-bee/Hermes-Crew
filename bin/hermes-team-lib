@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-# Shared helpers, sourced by hermes-team-{spawn,msg,board}. Not meant to be run.
+# Shared helpers, sourced by hermes-team-{spawn,msg} and hermes-tmux. Not meant to be run.
+# Portable: bash 3.2 and BSD userland (macOS) as well as GNU/Linux.
+lower() { printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]'; }   # ${1,,} needs bash >= 4
+
+short_hash() {  # first 6 hex digits of sha1($1); part of tmux/session names, so the value must never change
+  if command -v shasum >/dev/null 2>&1; then printf %s "$1" | shasum -a 1 | cut -c1-6
+  else python3 -c 'import hashlib, os, sys; print(hashlib.sha1(os.fsencode(sys.argv[1])).hexdigest()[:6])' "$1"; fi; }
+
+utf8_locale() {  # a UTF-8 locale that exists here: C.UTF-8 (glibc, musl); macOS has none, use en_US.UTF-8
+  if locale -a 2>/dev/null | grep -qixE 'c\.utf-?8'; then echo C.UTF-8
+  elif locale -a 2>/dev/null | grep -qixE 'en_us\.utf-?8'; then echo en_US.UTF-8
+  else echo C.UTF-8; fi; }
+
 my_pane() {  # the tmux pane whose process is an ancestor of this script
   local p=$$ id map; map=$(tmux list-panes -a -F '#{pane_pid} #{pane_id}' 2>/dev/null) || return 1
   while [ "${p:-1}" -gt 1 ]; do
@@ -20,7 +32,8 @@ ensure_team() {  # create <dir>/.team; its own .gitignore keeps team state out o
 # (HERMES_TEAM_PROMPT_SYMBOL). Placeholder text is drawn AFTER the cursor, so "empty input" means
 # the cursor sits right behind the prompt. Busy placeholders contain "/steer" in every locale.
 pane_idle() {
-  local t=$1 sym=${HERMES_TEAM_PROMPT_SYMBOL:-❯} x y mode line m LC_ALL=C.UTF-8
+  [ -n "${HT_UTF8:-}" ] || HT_UTF8=$(utf8_locale)   # looked up once per process
+  local t=$1 sym=${HERMES_TEAM_PROMPT_SYMBOL:-❯} x y mode line m LC_ALL=$HT_UTF8
   read -r y x mode < <(tmux display -p -t "$t" '#{cursor_y} #{cursor_x} #{pane_in_mode}' 2>/dev/null) || return 1
   [ "$mode" = 0 ] || return 1                       # copy mode / pane gone
   line=$(tmux capture-pane -p -t "$t" -S "$y" -E "$y" 2>/dev/null) || return 1

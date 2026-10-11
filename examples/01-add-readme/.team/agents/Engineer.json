@@ -1,0 +1,21 @@
+{
+ "role": "Engineer",
+ "pid": 166571,
+ "pane": "%1",
+ "model": "claude-fable-5-1",
+ "session": "ex",
+ "state": "idle",
+ "since": 1791678566.6665025,
+ "turn_id": "20261011_022817_4ef2e2:20261011_022817_4ef2e2:bed937f5",
+ "task": null,
+ "blocked_kind": null,
+ "last_error": null,
+ "tokens_in": 348397,
+ "tokens_out": 1199,
+ "turns": 3,
+ "heartbeat": 1791678617.4324577,
+ "started": 1791678497.4200246,
+ "plugin_version": "3.0.0",
+ "plugin_degraded": [],
+ "session_id": "20261011_022817_4ef2e2"
+}

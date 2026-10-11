@@ -7,8 +7,30 @@
 # its mailbox via `hermes-crew send` and the plugin delivers it; otherwise it is typed as above.
 # usage: hermes-team-msg <role|%pane-id> <message...>
 #        hermes-team-msg --list
+# real dir of this script, symlinks resolved portably (plain readlink: the GNU-only flag is missing on macOS)
+_s=$0; while [ -L "$_s" ]; do _l=$(readlink "$_s"); case $_l in /*) _s=$_l ;; *) _s=$(dirname "$_s")/$_l ;; esac; done; HT_BIN=$(cd "$(dirname "$_s")" && pwd -P)
 # shellcheck source=/dev/null  # hermes-team-lib, next to this script
-. "$(dirname "$(readlink -f "$0")")/hermes-team-lib"
+. "$HT_BIN/hermes-team-lib"
+
+mlog() { [ -n "$MLOG" ] && printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$FROM" "$T" "$1" "${BODY:0:80}" >> "$MLOG"; }
+deliver() {  # runs while `hermes-crew lock` holds the pane's lock: one delivery at a time per pane
+  end=$((SECONDS + ${HERMES_TEAM_MSG_TIMEOUT:-3600}))
+  while [ $SECONDS -lt "$end" ]; do
+    pane_exists "$TARGET" || break    # pane is gone
+    if pane_idle "$TARGET"; then
+      tmux send-keys -t "$TARGET" -l "$MSG"; sleep 0.4; tmux send-keys -t "$TARGET" Enter; mlog delivered
+      sleep 0.5; for ((_i = 0; _i < 40; _i++)); do pane_idle "$TARGET" || break; sleep 0.25; done   # hold the lock until Hermes reacts
+      exit 0
+    fi
+    sleep "${HERMES_TEAM_MSG_POLL:-2}"
+  done
+  mlog expired
+  if [ -n "$ME" ] && [ -z "$HERMES_TEAM_RAW" ] && pane_exists "$ME"; then
+    HERMES_TEAM_RAW=1 "$0" "$ME" "[hermes-team] message to $T expired undelivered: ${BODY:0:80}"
+  fi
+}
+# internal: re-run under the lock (see the end of this file); its state comes from the environment
+if [ "${1:-}" = "--deliver" ]; then deliver; exit 0; fi
 
 ME=$(my_pane); WIN=${ME:+$(tmux display -p -t "$ME" '#{session_name}:#{window_index}')}
 panes() { if [ -n "$WIN" ]; then tmux list-panes -t "$WIN" -F '#{pane_id} #{@role}'; else tmux list-panes -a -F '#{pane_id} #{@role}'; fi; }
@@ -25,7 +47,7 @@ if [ -n "$HERMES_TEAM_RAW" ]; then MSG=$BODY; else MSG="[from $FROM sent $(date 
 
 TDIR=$(team_dir_of "$TARGET"); [ -n "$TDIR" ] || TDIR=$(team_dir_of "${ME:-$TARGET}")
 # v3: target has a live plugin -> mailbox (the plugin injects the message when its agent is idle)
-crew="$(dirname "$(readlink -f "$0")")/hermes-crew"
+crew="$HT_BIN/hermes-crew"
 TROLE=$(tmux display -p -t "$TARGET" '#{@role}')
 AF="$TDIR/.team/agents/$TROLE.json"
 if [ -x "$crew" ] && [ -n "$TDIR" ] && [ -n "$TROLE" ] && [ -f "$AF" ]; then
@@ -37,25 +59,10 @@ else  # no team dir known: per-user, per-tmux-server lock (pane ids repeat acros
   RD="${XDG_RUNTIME_DIR:-/tmp}/hermes-team-$UID"; mkdir -p "$RD"; chmod 700 "$RD"
   LOCK="$RD/$(tmux display -p '#{pid}')-${TARGET#%}.lock"; MLOG=""
 fi
-mlog() { [ -n "$MLOG" ] && printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$FROM" "$T" "$1" "${BODY:0:80}" >> "$MLOG"; }
+[ -x "$crew" ] || { echo "hermes-team-msg: $crew is missing - re-run install.sh" >&2; exit 1; }
 mlog queued
 
-(
-  exec 9>"$LOCK"; flock 9                                      # one delivery at a time per pane
-  end=$((SECONDS + ${HERMES_TEAM_MSG_TIMEOUT:-3600}))
-  while [ $SECONDS -lt "$end" ]; do
-    pane_exists "$TARGET" || break    # pane is gone
-    if pane_idle "$TARGET"; then
-      tmux send-keys -t "$TARGET" -l "$MSG"; sleep 0.4; tmux send-keys -t "$TARGET" Enter; mlog delivered
-      sleep 0.5; for _ in $(seq 40); do pane_idle "$TARGET" || break; sleep 0.25; done   # hold the lock until Hermes reacts
-      exit 0
-    fi
-    sleep "${HERMES_TEAM_MSG_POLL:-2}"
-  done
-  mlog expired
-  if [ -n "$ME" ] && [ -z "$HERMES_TEAM_RAW" ] && pane_exists "$ME"; then
-    HERMES_TEAM_RAW=1 "$0" "$ME" "[hermes-team] message to $T expired undelivered: ${BODY:0:80}"
-  fi
-) >/dev/null 2>&1 &
+export TARGET MSG MLOG FROM T BODY ME
+"$crew" lock "$LOCK" -- "$BASH" "$0" --deliver >/dev/null 2>&1 &
 disown
 echo "queued for $T ($TARGET); delivered when it is idle"

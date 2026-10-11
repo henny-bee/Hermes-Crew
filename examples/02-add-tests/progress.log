@@ -1,0 +1,70 @@
+--- 02:31:15 events=3813 quiet=0s
+Hermes Crew · /tmp/example/proj                                      02:31:15
+AGENTS         state      for  task  tokens in/out  note
+  lead         busy       14s  -           88k/440
+  Engineer     busy        0s  -               0/0
+  Reviewer     busy        0s  -               0/0
+TASKS (2 claimed)
+  T1   claimed     Engineer   P3 Write unit tests for slugify.py
+  T2   claimed     Reviewer   P3 Review tests/test_slugify.py and ver…  waits T1
+NOT DONE: 2 open point(s) - see: hermes-crew status --done-check
+--- 02:31:35 events=7280 quiet=0s
+Hermes Crew · /tmp/example/proj                                      02:31:35
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle       13s  -          136k/945
+  Engineer     busy       20s  -           69k/802
+  Reviewer     idle       14s  -            40k/65
+TASKS (1 claimed · 1 in progress)
+  T1   in progress Engineer   P3 Write unit tests for slugify.py
+  T2   claimed     Reviewer   P3 Review tests/test_slugify.py and ver…  waits T1
+FILES (owner · approvals)
+  !! tests/test_slugify.py              Engineer   no approval
+NOT DONE: 3 open point(s) - see: hermes-crew status --done-check
+--- 02:31:55 events=13725 quiet=0s
+Hermes Crew · /tmp/example/proj                                      02:31:55
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle        3s  -         205k/1.1k
+  Engineer     idle        3s  -         229k/1.3k
+  Reviewer     busy       11s  -          129k/362
+TASKS (2 done)
+  T1   done        Engineer   P3 Write unit tests for slugify.py       verify ok
+  T2   done        Reviewer   P3 Review tests/test_slugify.py and ve…  verify ok
+FILES (owner · approvals)
+  ok tests/test_slugify.py              Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass
+--- 02:32:15 events=15076 quiet=0s
+Hermes Crew · /tmp/example/proj                                      02:32:15
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle       14s  -         256k/1.3k
+  Engineer     idle       24s  -         229k/1.3k
+  Reviewer     idle       19s  -          162k/461
+TASKS (2 done)
+  T1   done        Engineer   P3 Write unit tests for slugify.py       verify ok
+  T2   done        Reviewer   P3 Review tests/test_slugify.py and ve…  verify ok
+FILES (owner · approvals)
+  ok tests/test_slugify.py              Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass
+--- 02:32:35 events=15076 quiet=20s
+Hermes Crew · /tmp/example/proj                                      02:32:36
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle       34s  -         256k/1.3k
+  Engineer     idle       44s  -         229k/1.3k
+  Reviewer     idle       39s  -          162k/461
+TASKS (2 done)
+  T1   done        Engineer   P3 Write unit tests for slugify.py       verify ok
+  T2   done        Reviewer   P3 Review tests/test_slugify.py and ve…  verify ok
+FILES (owner · approvals)
+  ok tests/test_slugify.py              Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass
+--- 02:32:56 events=15076 quiet=41s
+Hermes Crew · /tmp/example/proj                                      02:32:56
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle       54s  -         256k/1.3k
+  Engineer     idle        1m  -         229k/1.3k
+  Reviewer     idle       59s  -          162k/461
+TASKS (2 done)
+  T1   done        Engineer   P3 Write unit tests for slugify.py       verify ok
+  T2   done        Reviewer   P3 Review tests/test_slugify.py and ve…  verify ok
+FILES (owner · approvals)
+  ok tests/test_slugify.py              Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass

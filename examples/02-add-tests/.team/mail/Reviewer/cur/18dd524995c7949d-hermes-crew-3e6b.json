@@ -1,0 +1,1 @@
+{"id":"18dd524995c7949d-hermes-crew-3e6b","from":"hermes-crew","to":"Reviewer","sent_at":"2026-10-11T02:31:42","ts":1791678702.762299,"body":"T2 'Review tests/test_slugify.py and verify test suite' is unblocked (deps done: T1). Start it: hermes-crew task start T2","reply_to":null,"ttl_s":3600}

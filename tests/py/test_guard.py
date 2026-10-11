@@ -1,11 +1,11 @@
 """hermes_crew.guard: pure ownership policy for pre_tool_call."""
+
 from __future__ import annotations
 
 import os
 import time
 
 import pytest
-
 from hermes_crew import guard
 
 
@@ -24,8 +24,9 @@ OWNERS = {"src/app.py": "Backend", "README.md": "Writer", "docs/a.md": "writer"}
 
 
 def ev(proj, tool, args, role="Frontend", owners=OWNERS, cwd=None, auto_own=True):
-    return guard.evaluate(tool, args, team_dir=str(proj), role=role, owners=owners,
-                          cwd=str(cwd or proj), auto_own=auto_own)
+    return guard.evaluate(
+        tool, args, team_dir=str(proj), role=role, owners=owners, cwd=str(cwd or proj), auto_own=auto_own
+    )
 
 
 # ---------------------------------------------------------------- paths
@@ -36,7 +37,7 @@ def test_team_relative(proj, tmp_path):
     assert guard.team_relative(str(proj / ".team"), str(proj)) is None
     assert guard.team_relative(str(proj), str(proj)) is None
     assert guard.team_relative(str(tmp_path / "elsewhere.py"), str(proj)) is None
-    assert guard.team_relative(str(tmp_path / "proj2/x.py"), str(proj)) is None   # prefix trap
+    assert guard.team_relative(str(tmp_path / "proj2/x.py"), str(proj)) is None  # prefix trap
     assert guard.team_relative(str(proj / "new/dir/file.py"), str(proj)) == "new/dir/file.py"
 
 
@@ -50,8 +51,10 @@ def test_team_relative_resolves_symlinks(proj, tmp_path):
 def test_write_file_owned_by_other_is_blocked(proj):
     d = ev(proj, "write_file", {"path": "src/app.py", "content": "y"})
     assert d.blocked
-    assert d.message == ('hermes-crew: src/app.py is owned by Backend. Send the owner the exact change: '
-                         'hermes-crew send Backend "..." (or ask lead to transfer it).')
+    assert d.message == (
+        "hermes-crew: src/app.py is owned by Backend. Send the owner the exact change: "
+        'hermes-crew send Backend "..." (or ask lead to transfer it).'
+    )
     assert d.hook_result() == {"action": "block", "message": d.message}
 
 
@@ -92,8 +95,7 @@ def test_patch_replace_mode(proj):
 
 
 def test_patch_v4a_mode(proj):
-    text = ("*** Begin Patch\n*** Update File: src/util.py\n@@\n-x\n+y\n"
-            "*** Add File: src/new.py\n+hello\n*** End Patch")
+    text = "*** Begin Patch\n*** Update File: src/util.py\n@@\n-x\n+y\n*** Add File: src/new.py\n+hello\n*** End Patch"
     d = ev(proj, "patch", {"mode": "patch", "patch": text})
     assert not d.blocked and d.claim == ["src/util.py", "src/new.py"]
     text2 = "*** Begin Patch\n*** Delete File: src/app.py\n*** End Patch"
@@ -109,10 +111,17 @@ def test_delete_never_auto_owns(proj):
 
 
 def test_other_tools_and_bad_args_are_allowed(proj):
-    for tool, args in (("read_file", {"path": "src/app.py"}), ("web_search", {"query": "x"}),
-                       ("write_file", {}), ("write_file", {"path": 7}), ("write_file", None),
-                       ("patch", {"mode": "patch", "patch": None}), ("terminal", {"command": None}),
-                       ("terminal", "not a dict"), ("write_file", ["list"])):
+    for tool, args in (
+        ("read_file", {"path": "src/app.py"}),
+        ("web_search", {"query": "x"}),
+        ("write_file", {}),
+        ("write_file", {"path": 7}),
+        ("write_file", None),
+        ("patch", {"mode": "patch", "patch": None}),
+        ("terminal", {"command": None}),
+        ("terminal", "not a dict"),
+        ("write_file", ["list"]),
+    ):
         d = ev(proj, tool, args)
         assert not d.blocked and d.claim == [], (tool, args)
 
@@ -120,6 +129,7 @@ def test_other_tools_and_bad_args_are_allowed(proj):
 def test_evaluate_never_raises(proj, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("bug")
+
     monkeypatch.setattr(guard, "file_tool_targets", boom)
     d = ev(proj, "write_file", {"path": "src/app.py"})
     assert not d.blocked
@@ -189,7 +199,7 @@ ALLOWED_COMMANDS = [
     "grep '>' src/app.py",
     'grep ">" src/app.py',
     "grep -n foo src/app.py | head",
-    "echo hi > src/util.py",             # unowned (terminal never auto-owns)
+    "echo hi > src/util.py",  # unowned (terminal never auto-owns)
     "echo hi > /tmp/out.txt",
     "make 2>&1 | tee build.log",
     "cmd >&2",
@@ -200,18 +210,18 @@ ALLOWED_COMMANDS = [
     "cp src/app.py /tmp/backup.py",
     "cp src/app.py src/copy.py",
     "rm -rf build node_modules",
-    "rm -r src/sub",                     # dir without owned files
+    "rm -r src/sub",  # dir without owned files
     "echo $X > $TARGET",
-    "x=$(rm src/app.py)",                # sub-command: documented limitation
+    "x=$(rm src/app.py)",  # sub-command: documented limitation
     "python -c \"open('src/app.py','w')\"",
     "cat <<EOF > notes.txt\nrm src/app.py\necho > README.md\nEOF",
     "echo hi > .team/scratch",
-    "rm 'src/*.py'",                     # quoted glob: literal name, not owned
+    "rm 'src/*.py'",  # quoted glob: literal name, not owned
     "# rm src/app.py",
-    "echo '",                            # unbalanced quote
+    "echo '",  # unbalanced quote
     "",
     "cd /tmp && rm app.py",
-    "cd $SOMEWHERE && rm app.py",        # unknown cwd → relative paths unresolved
+    "cd $SOMEWHERE && rm app.py",  # unknown cwd → relative paths unresolved
     "truncate --size 10 src/util.py",
 ]
 
@@ -254,8 +264,18 @@ def test_lead_is_blocked_too(proj):
 def test_tokenizer_quotes_and_ops():
     words = guard.tokenize("echo \"a > b\" 'c;d' e\\ f 2>err >&2 && x")
     texts = [(w.text, w.op) for w in words]
-    assert texts == [("echo", False), ("a > b", False), ("c;d", False), ("e f", False),
-                     (">", True), ("err", False), (">&", True), ("2", False), ("&&", True), ("x", False)]
+    assert texts == [
+        ("echo", False),
+        ("a > b", False),
+        ("c;d", False),
+        ("e f", False),
+        (">", True),
+        ("err", False),
+        (">&", True),
+        ("2", False),
+        ("&&", True),
+        ("x", False),
+    ]
 
 
 def test_tokenizer_heredoc_body_skipped():

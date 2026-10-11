@@ -1,0 +1,82 @@
+--- 02:28:24 events=4077 quiet=0s
+Hermes Crew · /tmp/example/proj                                      02:28:24
+AGENTS         state      for  task  tokens in/out  note
+  lead         busy       14s  -           99k/435
+  Engineer     busy        3s  -            13k/18
+  Reviewer     busy        1s  -               0/0
+TASKS (2 claimed)
+  T1   claimed     Engineer   P3 Write README.md with wordfreq usage and verifi…
+  T2   claimed     Reviewer   P3 Review and approve README.md           waits T1
+NOT DONE: 2 open point(s) - see: hermes-crew status --done-check
+--- 02:28:44 events=7899 quiet=0s
+Hermes Crew · /tmp/example/proj                                      02:28:44
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle       16s  -          129k/641
+  Engineer     busy       23s  -          163k/761
+  Reviewer     idle       14s  -            40k/71
+TASKS (1 claimed · 1 in progress)
+  T1   in progress Engineer   P3 Write README.md with wordfreq usage…  verify ok
+  T2   claimed     Reviewer   P3 Review and approve README.md           waits T1
+FILES (owner · approvals)
+  !! README.md                          Engineer   no approval
+NOT DONE: 3 open point(s) - see: hermes-crew status --done-check
+--- 02:29:05 events=13771 quiet=0s
+Hermes Crew · /tmp/example/proj                                      02:29:05
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle        1s  -          177k/691
+  Engineer     busy        2s  -         278k/1.1k
+  Reviewer     busy        8s  -           97k/270
+TASKS (1 in progress · 1 done)
+  T2   in progress Reviewer   P3 Review and approve README.md          verify ok
+  T1   done        Engineer   P3 Write README.md with wordfreq usage…  verify ok
+FILES (owner · approvals)
+  !! README.md                          Engineer   no approval
+NOT DONE: 2 open point(s) - see: hermes-crew status --done-check
+--- 02:29:25 events=19329 quiet=0s
+Hermes Crew · /tmp/example/proj                                      02:29:25
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle        3s  -          223k/885
+  Engineer     busy        2s  -         330k/1.2k
+  Reviewer     idle        1s  -          269k/770
+TASKS (2 done)
+  T1   done        Engineer   P3 Write README.md with wordfreq usage…  verify ok
+  T2   done        Reviewer   P3 Review and approve README.md          verify ok
+FILES (owner · approvals)
+  ok README.md                          Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass
+--- 02:29:45 events=19645 quiet=0s
+Hermes Crew · /tmp/example/proj                                      02:29:45
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle       23s  -          223k/885
+  Engineer     idle       18s  -         348k/1.2k
+  Reviewer     idle       22s  -          269k/770
+TASKS (2 done)
+  T1   done        Engineer   P3 Write README.md with wordfreq usage…  verify ok
+  T2   done        Reviewer   P3 Review and approve README.md          verify ok
+FILES (owner · approvals)
+  ok README.md                          Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass
+--- 02:30:05 events=19645 quiet=20s
+Hermes Crew · /tmp/example/proj                                      02:30:05
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle       43s  -          223k/885
+  Engineer     idle       39s  -         348k/1.2k
+  Reviewer     idle       42s  -          269k/770
+TASKS (2 done)
+  T1   done        Engineer   P3 Write README.md with wordfreq usage…  verify ok
+  T2   done        Reviewer   P3 Review and approve README.md          verify ok
+FILES (owner · approvals)
+  ok README.md                          Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass
+--- 02:30:25 events=19645 quiet=40s
+Hermes Crew · /tmp/example/proj                                      02:30:25
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle        1m  -          223k/885
+  Engineer     idle       59s  -         348k/1.2k
+  Reviewer     idle        1m  -          269k/770
+TASKS (2 done)
+  T1   done        Engineer   P3 Write README.md with wordfreq usage…  verify ok
+  T2   done        Reviewer   P3 Review and approve README.md          verify ok
+FILES (owner · approvals)
+  ok README.md                          Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass

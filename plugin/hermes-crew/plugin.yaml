@@ -5,7 +5,6 @@ author: Hermes Crew
 kind: standalone
 platforms:
   - linux
-  - macos
 provides_hooks:
   - on_session_start
   - pre_llm_call

@@ -10,7 +10,9 @@
 #   FAKE_PLACEHOLDER  dim idle placeholder drawn after the cursor (default: a suggestion like real Hermes; "" = none)
 #   FAKE_MENU=1       show an approval menu instead of the prompt: rows "❯ Allow once" ...
 #   FAKE_PROMPT_ROW   screen row of the bottom separator (default: last row); prompt is one row above
-log() { printf '%s %s %s %s\n' "$(date +%s.%N)" "${TMUX_PANE:-?}" "$1" "$2" >> "${FAKE_LOG:-/dev/null}"; }
+now() {  # sets NOW = epoch seconds with microseconds ($EPOCHREALTIME needs bash >= 5, `date +%N` GNU date)
+  if [ -n "${EPOCHREALTIME:-}" ]; then NOW=${EPOCHREALTIME/,/.}; else NOW=$(python3 -c 'import time; print("%.6f" % time.time())'); fi; }
+log() { now; printf '%s %s %s %s\n' "$NOW" "${TMUX_PANE:-?}" "$1" "$2" >> "${FAKE_LOG:-/dev/null}"; }
 log ARGS "$*"
 log ENV "dir=${HERMES_TEAM_DIR:-} role=${HERMES_TEAM_ROLE:-} session=${HERMES_CREW_SESSION:-} home=${HERMES_HOME:-}"
 # `chat --cli -s skill --continue name --query-file F`: F is the first input of the session
@@ -20,6 +22,7 @@ SYM=${FAKE_SYMBOL:-❯}; P="${FAKE_PROFILE:+$FAKE_PROFILE }$SYM "
 BUSY_TEXT=${FAKE_BUSY_TEXT:-"msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel"}
 ROWS=$(tput lines 2>/dev/null || echo 40); ROW=${FAKE_PROMPT_ROW:-$ROWS}   # row of the bottom separator
 COLS=$(tput cols 2>/dev/null || echo 80)
+RT=0.3; [ "${BASH_VERSINFO[0]}" -ge 4 ] || RT=1   # bash 3.2 (macOS) has no fractional read timeout
 trap 'exit 0' TERM HUP
 
 prompt() {  # $1: icon shown before the prompt, $2: text drawn after the cursor (dim). Real layout:
@@ -46,9 +49,9 @@ while true; do
   IFS= read -r l || exit 0
   log LINE "$l"; [ "$l" = /exit ] && exit 0
   [ -n "$FAKE_BUSY" ] || continue
-  end=$(( ${EPOCHREALTIME/./} + FAKE_BUSY * 1000000 ))
-  while [ "${EPOCHREALTIME/./}" -lt "$end" ]; do
+  now; end=$(( ${NOW/./} + FAKE_BUSY * 1000000 ))
+  while now; [ "${NOW/./}" -lt "$end" ]; do
     prompt "☤ " "$BUSY_TEXT"          # busy: agent icon before the symbol
-    if IFS= read -r -t 0.3 l2; then log BUSYLINE "$l2"; fi
+    if IFS= read -r -t "$RT" l2; then log BUSYLINE "$l2"; fi
   done
 done

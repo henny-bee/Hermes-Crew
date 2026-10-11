@@ -1,0 +1,55 @@
+name: release
+
+# Push an annotated tag v<version> (see scripts/bump-version.sh) to cut a release:
+# CI runs first, then the tarball is built and a GitHub Release is created from the CHANGELOG.md section.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # create the release and upload assets
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Tag matches the version in the tree
+        run: |
+          bash scripts/check-version.sh
+          version=$(sed -n 's/^__version__ *= *"\(.*\)"/\1/p' plugin/hermes-crew/hermes_crew/__init__.py)
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match __version__ ${version}" >&2
+            exit 1
+          fi
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+      - name: Release notes from CHANGELOG.md
+        run: bash scripts/changelog-section.sh "$VERSION" > release-notes.md
+      - name: Build tarball
+        run: |
+          name="hermes-crew-${VERSION}"
+          tar --create --gzip --file "${name}.tar.gz" \
+            --transform "s,^,${name}/," \
+            --exclude=__pycache__ --exclude='*.pyc' \
+            --sort=name --owner=0 --group=0 --numeric-owner \
+            bin skill plugin install.sh install.ps1
+          sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
+          tar --list --gzip --file "${name}.tar.gz" | sed -n 1,20p
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "hermes-crew-${VERSION}.tar.gz" "hermes-crew-${VERSION}.tar.gz.sha256" \
+            --title "hermes-crew ${VERSION}" \
+            --notes-file release-notes.md \
+            --verify-tag

@@ -1,0 +1,11 @@
+Hermes Crew · /tmp/example/proj                                      02:30:26
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle        1m  -          223k/885
+  Engineer     idle       59s  -         348k/1.2k
+  Reviewer     idle        1m  -          269k/770
+TASKS (2 done)
+  T1   done        Engineer   P3 Write README.md with wordfreq usage…  verify ok
+  T2   done        Reviewer   P3 Review and approve README.md          verify ok
+FILES (owner · approvals)
+  ok README.md                          Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass

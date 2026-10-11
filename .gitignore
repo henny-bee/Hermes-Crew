@@ -1,8 +1,25 @@
 .claude/
-.team/
+# the repo's own team state only (root-anchored): examples/*/.team/ (T60) are tracked
+/.team/
 *.bak-wsl-*
 __pycache__/
 *.pyc
 .pytest_cache/
 IMPROVEMENT-PLAN.md
 .ruff_cache/
+*.egg-info/
+.mypy_cache/
+.coverage
+# internal working plan (like IMPROVEMENT-PLAN.md)
+plan.md
+# test, build and release outputs
+.hypothesis/
+htmlcov/
+coverage.xml
+build/
+dist/
+*.tar.gz
+*.sha256
+# local virtualenvs
+.venv/
+venv/

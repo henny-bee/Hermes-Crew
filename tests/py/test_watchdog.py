@@ -1,4 +1,5 @@
 """hermes_crew.watchdog: pure escalation rules + dedup."""
+
 from __future__ import annotations
 
 from hermes_crew import watchdog
@@ -8,8 +9,16 @@ NOW = 1_000_000.0
 
 
 def agent(role, state="idle", since=NOW - 10, alive=True, **kw):
-    return {"role": role, "state": state, "since": since, "pid": 4242, "started": NOW - 3600,
-            "heartbeat": NOW - 5, "_alive": alive, **kw}
+    return {
+        "role": role,
+        "state": state,
+        "since": since,
+        "pid": 4242,
+        "started": NOW - 3600,
+        "heartbeat": NOW - 5,
+        "_alive": alive,
+        **kw,
+    }
 
 
 def alive(rec, now):
@@ -67,8 +76,7 @@ def test_dead_agent_without_tasks():
 
 
 def test_lead_and_system_roles_are_not_watched():
-    assert run([agent("lead", "blocked", since=NOW - 999, alive=False),
-                agent("user", alive=False)]) == []
+    assert run([agent("lead", "blocked", since=NOW - 999, alive=False), agent("user", alive=False)]) == []
 
 
 def test_failed_turn_once_per_turn():
@@ -82,9 +90,11 @@ def test_failed_turn_once_per_turn():
 
 
 def test_expired_messages_skip_lead_sender():
-    expired = [{"id": "abc-Coder-1f2e", "from": "Coder", "to": "Tester", "body": "please review"},
-               {"id": "abd-lead-0000", "from": "lead", "to": "Tester", "body": "x"},
-               {"id": "abe-hermes-crew-0001", "from": "hermes-crew", "to": "Tester", "body": "y"}]
+    expired = [
+        {"id": "abc-Coder-1f2e", "from": "Coder", "to": "Tester", "body": "please review"},
+        {"id": "abd-lead-0000", "from": "lead", "to": "Tester", "body": "x"},
+        {"id": "abe-hermes-crew-0001", "from": "hermes-crew", "to": "Tester", "body": "y"},
+    ]
     escs = run([agent("lead", "busy")], expired=expired)
     assert [e.key for e in escs] == ["expired:abc-Coder-1f2e"]
     assert "#1f2e from Coder to Tester expired" in escs[0].text
@@ -92,9 +102,11 @@ def test_expired_messages_skip_lead_sender():
 
 def test_stall_when_everyone_idle_and_work_open():
     agents = [agent("lead", since=NOW - 300), agent("Coder", since=NOW - 130), agent("Tester", since=NOW - 125)]
-    tasks = [{"id": "T1", "title": "api", "status": "claimed", "owner": "Coder"},
-             {"id": "T2", "title": "docs", "status": "open", "owner": None},
-             {"id": "T3", "title": "done", "status": "done", "owner": "Tester"}]
+    tasks = [
+        {"id": "T1", "title": "api", "status": "claimed", "owner": "Coder"},
+        {"id": "T2", "title": "docs", "status": "open", "owner": None},
+        {"id": "T3", "title": "done", "status": "done", "owner": "Tester"},
+    ]
     [e] = run(agents, tasks, unapproved=[("src/app.py", "Coder")])
     assert e.kind == "stall"
     assert "T1 'api' claimed — owner Coder" in e.text
@@ -123,8 +135,7 @@ def test_no_stall_cases():
 
 def test_stall_ignores_dead_and_exited_teammates():
     tasks = [{"id": "T1", "title": "api", "status": "orphaned", "owner": None}]
-    agents = [agent("lead", since=NOW - 500), agent("Coder", since=NOW - 500),
-              agent("Old", "exited", alive=False)]
+    agents = [agent("lead", since=NOW - 500), agent("Coder", since=NOW - 500), agent("Old", "exited", alive=False)]
     assert kinds(run(agents, tasks)) == ["stall"]
 
 
@@ -153,7 +164,8 @@ def test_filter_new_persists(team):
 def test_default_alive_uses_pid_and_heartbeat():
     import os
     import time
+
     now = time.time()
     assert watchdog.default_alive({"pid": os.getpid(), "heartbeat": now - 1}, now)
     assert not watchdog.default_alive({"pid": os.getpid(), "heartbeat": now - 120}, now)
-    assert not watchdog.default_alive({"pid": 2 ** 22 + 12345, "heartbeat": now}, now)
+    assert not watchdog.default_alive({"pid": 2**22 + 12345, "heartbeat": now}, now)

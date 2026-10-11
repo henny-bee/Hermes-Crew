@@ -1,8 +1,11 @@
 """`.team/agents/<Role>.json`: the live state of each agent, written by its plugin."""
+
 from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
+from typing import Any
 
 from . import __version__, events, store
 from .team import Team
@@ -10,19 +13,33 @@ from .team import Team
 STATES = ("starting", "idle", "busy", "blocked", "exited")
 HEARTBEAT_MAX_AGE = 60.0
 
-DEFAULTS: dict = {
-    "role": "", "pid": None, "pane": None, "model": None, "session": None,
-    "state": "starting", "since": None, "turn_id": None, "task": None, "blocked_kind": None,
-    "last_error": None, "tokens_in": 0, "tokens_out": 0, "turns": 0,
-    "heartbeat": None, "started": None, "plugin_version": __version__,
+DEFAULTS: dict[str, Any] = {
+    "role": "",
+    "pid": None,
+    "pane": None,
+    "model": None,
+    "session": None,
+    "state": "starting",
+    "since": None,
+    "turn_id": None,
+    "task": None,
+    "blocked_kind": None,
+    "last_error": None,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "turns": 0,
+    "heartbeat": None,
+    "started": None,
+    "plugin_version": __version__,
+    "plugin_degraded": [],  # hooks / ctx methods the running Hermes lacks (plugin register probe)
 }
 
 
-def path(team: Team, role: str):
+def path(team: Team, role: str) -> Path:
     return team.path("agents", f"{role}.json")
 
 
-def read(team: Team, role: str) -> dict | None:
+def read(team: Team, role: str) -> dict[str, Any] | None:
     """State of `role` (exact file name first, then case-insensitive match), or None."""
     rec = store.read_json(path(team, role))
     if rec is None:
@@ -37,7 +54,7 @@ def read(team: Team, role: str) -> dict | None:
     return {**DEFAULTS, **rec}
 
 
-def all_agents(team: Team) -> list[dict]:
+def all_agents(team: Team) -> list[dict[str, Any]]:
     """All agent records, sorted with lead first, then by role."""
     d = team.path("agents")
     out = []
@@ -50,7 +67,7 @@ def all_agents(team: Team) -> list[dict]:
     return out
 
 
-def update(team: Team, role: str, **changes) -> dict:
+def update(team: Team, role: str, **changes: Any) -> dict[str, Any]:
     """Merge `changes` into the agent's record (atomic replace, under lock `agent-<role>`).
 
     - `since` is set to now when `state` changes, and a `state` event is emitted (from/to/turn_id).
@@ -63,8 +80,7 @@ def update(team: Team, role: str, **changes) -> dict:
     now = time.time()
     with team.lock(f"agent-{role}"):
         old = read(team, role)
-        rec = dict(old) if old else {**DEFAULTS, "role": role, "started": now, "since": now,
-                                      "pid": os.getpid()}
+        rec = dict(old) if old else {**DEFAULTS, "role": role, "started": now, "since": now, "pid": os.getpid()}
         rec["role"] = old["role"] if old and old.get("role") else role
         prev = rec.get("state") if old else None
         rec.update(changes)
@@ -80,24 +96,27 @@ def update(team: Team, role: str, **changes) -> dict:
     return rec
 
 
-def set_state(team: Team, role: str, new_state: str, **fields) -> dict:
+def set_state(team: Team, role: str, new_state: str, **fields: Any) -> dict[str, Any]:
     return update(team, role, state=new_state, **fields)
 
 
-def heartbeat(team: Team, role: str, pid: int | None = None) -> dict:
+def heartbeat(team: Team, role: str, pid: int | None = None) -> dict[str, Any]:
     return update(team, role, heartbeat=time.time(), pid=pid if pid is not None else os.getpid())
 
 
-def add_tokens(team: Team, role: str, tokens_in: int = 0, tokens_out: int = 0) -> dict:
+def add_tokens(team: Team, role: str, tokens_in: int = 0, tokens_out: int = 0) -> dict[str, Any]:
     """Atomically add usage (read-modify-write under the agent lock)."""
     with team.lock(f"agent-{role}-usage"):
         rec = read(team, role) or {}
-        return update(team, role,
-                      tokens_in=int(rec.get("tokens_in") or 0) + int(tokens_in or 0),
-                      tokens_out=int(rec.get("tokens_out") or 0) + int(tokens_out or 0))
+        return update(
+            team,
+            role,
+            tokens_in=int(rec.get("tokens_in") or 0) + int(tokens_in or 0),
+            tokens_out=int(rec.get("tokens_out") or 0) + int(tokens_out or 0),
+        )
 
 
-def pid_exists(pid) -> bool:
+def pid_exists(pid: Any) -> bool:
     try:
         pid = int(pid)
     except (TypeError, ValueError):
@@ -115,7 +134,7 @@ def pid_exists(pid) -> bool:
     return True
 
 
-def is_alive(rec: dict | None, now: float | None = None) -> bool:
+def is_alive(rec: dict[str, Any] | None, now: float | None = None) -> bool:
     """pid exists and heartbeat younger than 60 s."""
     if not rec:
         return False
@@ -128,6 +147,8 @@ def is_alive(rec: dict | None, now: float | None = None) -> bool:
     return fresh and pid_exists(rec.get("pid"))
 
 
-def is_dead(rec: dict | None, now: float | None = None) -> bool:
+def is_dead(rec: dict[str, Any] | None, now: float | None = None) -> bool:
     """Not alive and did not exit cleanly (state != exited)."""
-    return bool(rec) and rec.get("state") != "exited" and not is_alive(rec, now)
+    if not rec:
+        return False
+    return rec.get("state") != "exited" and not is_alive(rec, now)
