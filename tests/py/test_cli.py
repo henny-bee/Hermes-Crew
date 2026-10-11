@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import subprocess
 import sys
 
 import pytest
-
 from conftest import REPO
-from hermes_crew import cli, mailbox, state, tasks
+from hermes_crew import __version__, cli, mailbox, state, tasks
+
+# Minimal PATH for launcher subprocesses, with the running interpreter's dir first: macOS ships
+# /usr/bin/python3 3.9, which the launcher (rightly) refuses.
+MIN_PATH = os.pathsep.join([os.path.dirname(sys.executable), "/usr/bin", "/bin"])
 
 
 @pytest.fixture
@@ -24,6 +29,7 @@ def as_role(team, monkeypatch, capsys):
             rc = e.code
         out = capsys.readouterr()
         return rc, out.out, out.err
+
     return run
 
 
@@ -82,7 +88,7 @@ def test_usage_errors_exit_2(as_role):
     assert as_role("lead", "task", "frob")[0] == 2
     assert as_role("lead", "nonsense")[0] == 2
     assert as_role("lead")[0] == 2
-    rc, _, err = as_role("lead", "verify", "T1")
+    rc, _, _err = as_role("lead", "verify", "T1")
     assert rc == 2
 
 
@@ -93,7 +99,7 @@ def test_verify_cli(team, as_role):
     assert as_role("Eng", "verify", "T1", "--", sys.executable, "-c", "import sys; sys.exit(4)")[0] == 4
     assert as_role("Eng", "verify", "--timeout", "5", "T1", "--", "true")[0] == 0
     assert as_role("Eng", "verify", "T1", "--timeout", "5", "--", "true")[0] == 0
-    assert as_role("Eng", "verify", "T1", sys.executable, "-c", "pass")[0] == 0   # no "--"
+    assert as_role("Eng", "verify", "T1", sys.executable, "-c", "pass")[0] == 0  # no "--"
     recs = [json.loads(x) for x in team.path("verify.jsonl").read_text().splitlines()]
     assert [r["exit"] for r in recs] == [4, 0, 0, 0]
 
@@ -132,17 +138,26 @@ def test_board_passthrough(team, as_role):
 
 
 def test_launcher_subprocess(tmp_path):
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "HERMES_TEAM_DIR": str(tmp_path / "p"),
-           "HERMES_TEAM_ROLE": "lead", "TMUX_TMPDIR": str(tmp_path)}
-    p = subprocess.run([sys.executable, str(REPO / "bin" / "hermes-crew"), "--version"], capture_output=True, text=True, env=env)
-    assert p.returncode == 0 and p.stdout.strip() == "hermes-crew 3.0.0"
-    p = subprocess.run([sys.executable, str(REPO / "bin" / "hermes-crew"), "task", "add", "hello"],
-                       capture_output=True, text=True, env=env)
+    env = {
+        "PATH": MIN_PATH,
+        "HOME": str(tmp_path),
+        "HERMES_TEAM_DIR": str(tmp_path / "p"),
+        "HERMES_TEAM_ROLE": "lead",
+        "TMUX_TMPDIR": str(tmp_path),
+    }
+    p = subprocess.run([str(REPO / "bin" / "hermes-crew"), "--version"], capture_output=True, text=True, env=env)
+    assert p.returncode == 0 and p.stdout.strip() == f"hermes-crew {__version__}"
+    p = subprocess.run(
+        [str(REPO / "bin" / "hermes-crew"), "task", "add", "hello"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     assert p.returncode == 0 and "added T1" in p.stdout
     assert (tmp_path / "p" / ".team" / ".gitignore").exists()
     env["HERMES_CREW_LIB"] = str(tmp_path / "nowhere")
-    p = subprocess.run([sys.executable, str(REPO / "bin" / "hermes-crew"), "--version"], capture_output=True, text=True, env=env)
-    assert p.returncode == 0          # falls back to the checkout
+    p = subprocess.run([str(REPO / "bin" / "hermes-crew"), "--version"], capture_output=True, text=True, env=env)
+    assert p.returncode == 0  # falls back to the checkout
 
 
 def test_task_done_note_and_show(team, as_role):
@@ -156,9 +171,20 @@ def test_task_done_note_and_show(team, as_role):
     assert sorted(p.name for p in team.root.iterdir()) == [".team"]
 
 
-READ_ONLY = [["doctor"], ["doctor", "--json"], ["status"], ["status", "--json"], ["status", "--done-check"],
-             ["log"], ["inbox"], ["inbox", "--all"], ["task", "list"], ["task", "list", "--mine"],
-             ["task", "show", "T1"], ["board", "status"]]
+READ_ONLY = [
+    ["doctor"],
+    ["doctor", "--json"],
+    ["status"],
+    ["status", "--json"],
+    ["status", "--done-check"],
+    ["log"],
+    ["inbox"],
+    ["inbox", "--all"],
+    ["task", "list"],
+    ["task", "list", "--mine"],
+    ["task", "show", "T1"],
+    ["board", "status"],
+]
 
 
 @pytest.mark.parametrize("argv", READ_ONLY, ids=lambda a: " ".join(a))
@@ -170,10 +196,8 @@ def test_read_only_commands_never_create_team(tmp_path, monkeypatch, capsys, arg
     if via_env:
         monkeypatch.setenv("HERMES_TEAM_DIR", str(proj))
     monkeypatch.setenv("HERMES_TEAM_ROLE", "lead")
-    try:
+    with contextlib.suppress(SystemExit):
         cli.main(argv)
-    except SystemExit:
-        pass
     out = capsys.readouterr().out
     assert list(proj.iterdir()) == [], f"{argv} wrote into a non-team dir"
     if argv == ["doctor"]:
@@ -181,9 +205,41 @@ def test_read_only_commands_never_create_team(tmp_path, monkeypatch, capsys, arg
 
 
 def test_doctor_subprocess_outside_team(tmp_path):
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "TMUX_TMPDIR": str(tmp_path)}
+    env = {"PATH": MIN_PATH, "HOME": str(tmp_path), "TMUX_TMPDIR": str(tmp_path)}
     proj = tmp_path / "repo"
     proj.mkdir()
-    p = subprocess.run([sys.executable, str(REPO / "bin" / "hermes-crew"), "doctor"], cwd=proj,
-                       capture_output=True, text=True, env=env)
+    p = subprocess.run([str(REPO / "bin" / "hermes-crew"), "doctor"], cwd=proj, capture_output=True, text=True, env=env)
     assert "not inside a team" in p.stdout and not (proj / ".team").exists()
+
+
+# ---------------------------------------------------------------- lock
+def test_lock_runs_command_and_returns_its_exit_code(team, as_role):
+    assert as_role("Eng", "lock", "deliver", "--", sys.executable, "-c", "import sys; sys.exit(3)")[0] == 3
+    assert team.path("locks", "deliver.lock").exists()
+    assert as_role("Eng", "lock", "deliver", sys.executable, "-c", "pass")[0] == 0  # no "--"
+    assert as_role("Eng", "lock", "deliver", "--", "true")[0] == 0
+
+
+def test_lock_path_name_and_errors(team, as_role, tmp_path):
+    lock = tmp_path / "elsewhere" / "x.lock"
+    assert as_role("Eng", "lock", str(lock), "--", "true")[0] == 0 and lock.exists()
+    rc, _, err = as_role("Eng", "lock", "deliver")
+    assert rc == 2 and "usage: hermes-crew lock" in err
+    rc, _, err = as_role("Eng", "lock", "..", "--", "true")
+    assert rc == 1 and "bad lock name" in err
+    rc, _, err = as_role("Eng", "lock", "deliver", "--", str(tmp_path / "no-such-cmd"))
+    assert rc == 127 and "cannot run" in err
+
+
+def test_lock_signal_exit_code(team, as_role):
+    kill_self = "import os, signal; os.kill(os.getpid(), signal.SIGTERM)"
+    assert as_role("Eng", "lock", "deliver", "--", sys.executable, "-c", kill_self)[0] == 128 + 15
+
+
+def test_lock_is_exclusive_across_processes(tmp_path):
+    lock, out = tmp_path / "l.lock", tmp_path / "out"
+    body = f"import time; f = open({str(out)!r}, 'a'); f.write('S'); f.flush(); time.sleep(0.4); f.write('E')"
+    argv = [str(REPO / "bin" / "hermes-crew"), "lock", str(lock), "--", sys.executable, "-c", body]
+    ps = [subprocess.Popen(argv) for _ in range(3)]
+    assert [p.wait(timeout=30) for p in ps] == [0, 0, 0]
+    assert out.read_text() == "SE" * 3  # never two holders at once

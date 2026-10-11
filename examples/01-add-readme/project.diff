@@ -1,0 +1,84 @@
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..7e42744
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,78 @@
++# wordfreq
++
++`wordfreq.py` is a simple command-line tool that prints the most frequent words in a text file or standard input.
++
++## Features
++
++- Extracts words matching English letters and apostrophes (`[A-Za-z']+`).
++- Case-sensitive by default, with optional case-insensitive counting.
++- Configurable number of top frequent words to display (default: 10).
++- Reads from a specified text file or from standard input (`stdin`).
++
++## Usage
++
++```bash
++python3 wordfreq.py [-h] [--top TOP] [-i] [file]
++```
++
++### Arguments and Options
++
++- `file`: Path to the text file to analyze. If omitted, `wordfreq.py` reads from standard input.
++- `-i`, `--ignore-case`: Ignore case distinctions (e.g. counts `"The"` and `"the"` as the same word).
++- `--top TOP`: Number of most frequent words to output (default: `10`).
++- `-h`, `--help`: Show usage help message and exit.
++
++## Examples
++
++### Basic File Usage
++
++Analyze a file with default settings (top 10 words, case-sensitive):
++
++```bash
++python3 wordfreq.py sample.txt
++```
++
++Output:
++```text
++    3 fox
++    3 the
++    2 The
++    2 dog
++    1 quick
++    1 brown
++    1 jumps
++    1 over
++    1 lazy
++    1 barks
++```
++
++### Case-Insensitive with Top N Filter
++
++Count words ignoring case and restrict results to the top 5 words:
++
++```bash
++python3 wordfreq.py -i --top 5 sample.txt
++```
++
++Output:
++```text
++    5 the
++    3 fox
++    2 dog
++    1 quick
++    1 brown
++```
++
++### Reading from Standard Input
++
++You can pipe text directly into `wordfreq.py`:
++
++```bash
++echo "apple banana apple orange banana apple" | python3 wordfreq.py --top 2
++```
++
++Output:
++```text
++    3 apple
++    2 banana
++```

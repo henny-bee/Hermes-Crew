@@ -1,0 +1,5 @@
+ app.py                  |  50 ++++++++++++++++---
+ config.json             |   6 +++
+ migrate_config.py       |  42 ++++++++++++++++
+ tests/test_migration.py | 128 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 218 insertions(+), 8 deletions(-)

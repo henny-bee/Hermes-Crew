@@ -1,0 +1,2 @@
+ tests/test_slugify.py | 61 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 61 insertions(+)

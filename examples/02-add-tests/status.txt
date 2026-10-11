@@ -1,0 +1,11 @@
+Hermes Crew · /tmp/example/proj                                      02:32:56
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle       54s  -         256k/1.3k
+  Engineer     idle        1m  -         229k/1.3k
+  Reviewer     idle       59s  -          162k/461
+TASKS (2 done)
+  T1   done        Engineer   P3 Write unit tests for slugify.py       verify ok
+  T2   done        Reviewer   P3 Review tests/test_slugify.py and ve…  verify ok
+FILES (owner · approvals)
+  ok tests/test_slugify.py              Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass

@@ -4,9 +4,8 @@ import json
 import multiprocessing as mp
 import os
 
-import pytest
-
 import mp_workers
+import pytest
 from hermes_crew import board, events
 from hermes_crew.board import BoardError
 
@@ -25,9 +24,9 @@ def test_rel_and_inside(team, monkeypatch):
 def test_own_transfer_release(team):
     assert board.own(team, "A", "f.txt", "g.txt") == ["f.txt", "g.txt"]
     assert board.owner_of(team, "f.txt") == "A" and board.owner_of(team, "nope") is None
-    with pytest.raises(BoardError, match="REFUSED: f.txt is owned by A - ask A \\(or lead\\)"):
+    with pytest.raises(BoardError, match=r"REFUSED: f\.txt is owned by A - ask A \(or lead\)"):
         board.own(team, "B", "h.txt", "f.txt")
-    assert board.owner_of(team, "h.txt") is None                  # all-or-nothing
+    assert board.owner_of(team, "h.txt") is None  # all-or-nothing
     with pytest.raises(BoardError, match="only A or lead can transfer"):
         board.transfer(team, "B", "f.txt", "B")
     assert board.transfer(team, "A", "f.txt", "B") == "A"
@@ -118,6 +117,7 @@ def test_main_texts(team, monkeypatch, capsys):
 
 def test_status_empty_board_does_not_create_team(tmp_path, capsys):
     from hermes_crew.team import Team
+
     t = Team(tmp_path / "x")
     assert board.main(["status"], team=t, role="lead") == 0
     assert "(board is empty)" in capsys.readouterr().out
@@ -128,8 +128,10 @@ def test_concurrent_own_one_winner(team, tmp_path):
     ctx = mp.get_context("spawn")
     for i in range(4):
         outs = [tmp_path / f"o{i}-{j}.json" for j in range(4)]
-        ps = [ctx.Process(target=mp_workers.board_own, args=(str(team.root), f"R{j}", f"f{i}.txt", str(o)))
-              for j, o in enumerate(outs)]
+        ps = [
+            ctx.Process(target=mp_workers.board_own, args=(str(team.root), f"R{j}", f"f{i}.txt", str(o)))
+            for j, o in enumerate(outs)
+        ]
         for p in ps:
             p.start()
         for p in ps:
@@ -141,8 +143,10 @@ def test_concurrent_own_one_winner(team, tmp_path):
 def test_concurrent_decide_unique_numbers(team, tmp_path):
     ctx = mp.get_context("spawn")
     outs = [tmp_path / f"d{j}.json" for j in range(8)]
-    ps = [ctx.Process(target=mp_workers.board_decide, args=(str(team.root), f"R{j}", f"d{j}", str(o)))
-          for j, o in enumerate(outs)]
+    ps = [
+        ctx.Process(target=mp_workers.board_decide, args=(str(team.root), f"R{j}", f"d{j}", str(o)))
+        for j, o in enumerate(outs)
+    ]
     for p in ps:
         p.start()
     for p in ps:

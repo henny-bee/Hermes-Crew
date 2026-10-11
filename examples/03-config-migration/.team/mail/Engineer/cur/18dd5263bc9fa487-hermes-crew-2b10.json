@@ -1,0 +1,1 @@
+{"id":"18dd5263bc9fa487-hermes-crew-2b10","from":"hermes-crew","to":"Engineer","sent_at":"2026-10-11T02:33:35","ts":1791678815.083143,"body":"lead assigned you T1 'Migrate config to JSON, update app.py, and add unit tests'. Start with: hermes-crew task start T1","reply_to":null,"ttl_s":3600}

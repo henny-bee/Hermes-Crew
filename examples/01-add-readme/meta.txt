@@ -1,0 +1,10 @@
+example: 01-add-readme
+started: 2026-10-11T02:28:03+02:00
+hermes: Hermes Agent v0.21.5+8076.g85db7c3 (2026.9.24) · upstream fa3aa9b7
+hermes-crew: hermes-crew 3.0.0
+repo head: 54cb978 (+ uncommitted working tree)
+model: claude-fable-5-1
+config: max_turns 40, reasoning_effort low, memory off, no MCP servers; approvals mode default
+timebox: 20 min
+command: env -u HERMES_TEAM_DIR -u HERMES_TEAM_ROLE bash examples/.harness/run-example.sh 01-add-readme 20 (first run used the same script from a scratch copy; see .harness/README.md)
+ended: 2026-10-11T02:30:26+02:00 (done-check first passed: 2026-10-11T02:29:25+02:00)

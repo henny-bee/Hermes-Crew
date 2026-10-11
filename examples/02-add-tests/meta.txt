@@ -1,0 +1,10 @@
+example: 02-add-tests
+started: 2026-10-11T02:30:54+02:00
+hermes: Hermes Agent v0.21.5+8076.g85db7c3 (2026.9.24) · upstream fa3aa9b7
+hermes-crew: hermes-crew 3.0.0
+repo head: 54cb978 (+ uncommitted working tree)
+model: claude-fable-5-1
+config: max_turns 40, reasoning_effort low, memory off, no MCP servers; approvals mode default
+timebox: 20 min
+command: env -u HERMES_TEAM_DIR -u HERMES_TEAM_ROLE bash examples/.harness/run-example.sh 02-add-tests 20
+ended: 2026-10-11T02:32:56+02:00 (done-check first passed: 2026-10-11T02:31:55+02:00)

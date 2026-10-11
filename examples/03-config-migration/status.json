@@ -1,0 +1,231 @@
+{
+ "team": "/tmp/example/proj",
+ "time": "2026-10-11T02:36:40",
+ "agents": [
+  {
+   "role": "lead",
+   "pid": 172784,
+   "pane": "%0",
+   "model": "claude-fable-5-1",
+   "session": "ex",
+   "state": "idle",
+   "since": 1791678986.5281484,
+   "turn_id": "20261011_023320_bf6c85:20261011_023320_bf6c85:665b4bc7",
+   "task": null,
+   "blocked_kind": null,
+   "last_error": null,
+   "tokens_in": 300212,
+   "tokens_out": 1716,
+   "turns": 3,
+   "heartbeat": 1791678994.538245,
+   "started": 1791678799.511791,
+   "plugin_version": "3.0.0",
+   "plugin_degraded": [],
+   "session_id": "20261011_023320_bf6c85",
+   "alive": true,
+   "dead": false,
+   "for_s": 13.9
+  },
+  {
+   "role": "Engineer",
+   "pid": 173232,
+   "pane": "%1",
+   "model": "claude-fable-5-1",
+   "session": "ex",
+   "state": "idle",
+   "since": 1791678900.5263028,
+   "turn_id": "20261011_023332_1e17af:20261011_023332_1e17af:a3f4604d",
+   "task": null,
+   "blocked_kind": null,
+   "last_error": null,
+   "tokens_in": 440328,
+   "tokens_out": 3098,
+   "turns": 2,
+   "heartbeat": 1791678992.8126128,
+   "started": 1791678812.7947073,
+   "plugin_version": "3.0.0",
+   "plugin_degraded": [],
+   "session_id": "20261011_023332_1e17af",
+   "alive": true,
+   "dead": false,
+   "for_s": 99.9
+  },
+  {
+   "role": "Reviewer",
+   "pid": 173324,
+   "pane": "%2",
+   "model": "claude-fable-5-1",
+   "session": "ex",
+   "state": "idle",
+   "since": 1791678946.5637403,
+   "turn_id": "20261011_023333_ab8019:20261011_023333_ab8019:4be9e37f",
+   "task": null,
+   "blocked_kind": null,
+   "last_error": null,
+   "tokens_in": 619559,
+   "tokens_out": 1856,
+   "turns": 5,
+   "heartbeat": 1791678993.3059807,
+   "started": 1791678813.2906766,
+   "plugin_version": "3.0.0",
+   "plugin_degraded": [],
+   "session_id": "20261011_023333_ab8019",
+   "alive": true,
+   "dead": false,
+   "for_s": 53.8
+  }
+ ],
+ "tasks": [
+  {
+   "id": "T1",
+   "title": "Migrate config to JSON, update app.py, and add unit tests",
+   "deps": [],
+   "priority": 3,
+   "owner": "Engineer",
+   "desc": "Write migrate_config.py (reads config.ini and writes config.json with keys host, port:int, db_url, debug:bool; must not overwrite existing config.json). Update app.py load_config(path='config.json') preserving fallback defaults. Write tests in tests/test_migration.py using unittest standard library. Run tests via hermes-crew verify python3 -m unittest discover tests, claim ownership of authored files, and hand off to Reviewer.",
+   "status": "done",
+   "created_by": "lead",
+   "created": "2026-10-11T02:33:35",
+   "updated": "2026-10-11T02:34:46",
+   "reason": null,
+   "handoff": ".team/handoff/T1.md",
+   "prev_owner": null,
+   "waiting_on": [],
+   "ready": true,
+   "verify": {
+    "exit": 0,
+    "cmd": "python3 -m unittest discover -s tests",
+    "t": "2026-10-11T02:34:38",
+    "by": "Engineer",
+    "duration_s": 0.059
+   }
+  },
+  {
+   "id": "T2",
+   "title": "Review config migration, test parity, and approve deliverables",
+   "deps": [
+    "T1"
+   ],
+   "priority": 3,
+   "owner": "Reviewer",
+   "desc": "Run migrate_config.py on real config.ini. Verify app.py produces identical values as before the change (compare against git HEAD/history without git stash, do not modify files you do not own). Approve each deliverable file with hermes-crew board approve <file> '<details>'.",
+   "status": "done",
+   "created_by": "lead",
+   "created": "2026-10-11T02:33:37",
+   "updated": "2026-10-11T02:35:35",
+   "reason": null,
+   "handoff": ".team/handoff/T2.md",
+   "prev_owner": null,
+   "waiting_on": [],
+   "ready": true,
+   "verify": {
+    "exit": 0,
+    "cmd": "python3 -c 'import subprocess, sys, tempfile, os, json, migrate_config, app; old_code = subprocess.check_output([\"git\", \"show\", \"HEAD:app.py\"], text=True); old_out = subprocess.check_output([sys.executable, \"-c\", old_code], text=True).strip(); new_out = subprocess.check_output([sys.executable, \"app.py\"], text=True).strip(); assert old_out == new_out == \"{\\\"host\\\": \\\"0.0.0.0\\\", \\\"port\\\": 9090, \\\"db_url\\\": \\\"postgresql://app@db.internal/app\\\", \\\"debug\\\": True}\".replace(\"\\\"\", \"\\x27\"); print(\"PARITY CONFIRMED\")'",
+    "t": "2026-10-11T02:35:21",
+    "by": "Reviewer",
+    "duration_s": 0.078
+   }
+  }
+ ],
+ "files": [
+  {
+   "file": "app.py",
+   "owner": "Engineer",
+   "hash": "863c85d1eeea",
+   "approvals": [
+    {
+     "role": "Reviewer",
+     "hash": "863c85d1eeea",
+     "evidence": "Verified JSON config loading, defaults fallback, and output parity with pre-migration app.py",
+     "time": "2026-10-11T02:35:25",
+     "status": "OK"
+    }
+   ],
+   "ok": true
+  },
+  {
+   "file": "config.json",
+   "owner": "Engineer",
+   "hash": "fbe0324efd5e",
+   "approvals": [
+    {
+     "role": "Reviewer",
+     "hash": "fbe0324efd5e",
+     "evidence": "Verified migrated JSON values match config.ini exactly with proper types",
+     "time": "2026-10-11T02:35:27",
+     "status": "OK"
+    }
+   ],
+   "ok": true
+  },
+  {
+   "file": "migrate_config.py",
+   "owner": "Engineer",
+   "hash": "206560934003",
+   "approvals": [
+    {
+     "role": "Reviewer",
+     "hash": "206560934003",
+     "evidence": "Verified INI to JSON migration logic, fallback handling, overwrite prevention, and CLI execution",
+     "time": "2026-10-11T02:35:29",
+     "status": "OK"
+    }
+   ],
+   "ok": true
+  },
+  {
+   "file": "tests/test_migration.py",
+   "owner": "Engineer",
+   "hash": "d8a027ddae30",
+   "approvals": [
+    {
+     "role": "Reviewer",
+     "hash": "d8a027ddae30",
+     "evidence": "Verified comprehensive test coverage for migration, overwriting prevention, defaults, and app config loading",
+     "time": "2026-10-11T02:35:31",
+     "status": "OK"
+    }
+   ],
+   "ok": true
+  }
+ ],
+ "decisions": [],
+ "done_check": [],
+ "metrics": {
+  "tasks": {
+   "T1": {
+    "claimed": "2026-10-11T02:33:35",
+    "done": "2026-10-11T02:34:46",
+    "wall_s": 71.0,
+    "reopens": 0
+   },
+   "T2": {
+    "claimed": "2026-10-11T02:33:37",
+    "done": "2026-10-11T02:35:35",
+    "wall_s": 118.2,
+    "reopens": 0
+   }
+  },
+  "roles": {
+   "lead": {
+    "tokens_in": 300212,
+    "tokens_out": 1716
+   },
+   "Engineer": {
+    "tokens_in": 440328,
+    "tokens_out": 3098
+   },
+   "Reviewer": {
+    "tokens_in": 619559,
+    "tokens_out": 1856
+   }
+  },
+  "totals": {
+   "tasks_timed": 2,
+   "wall_s": 189.2,
+   "reopens": 0,
+   "tokens_in": 1360099,
+   "tokens_out": 6670
+  }
+ }
+}

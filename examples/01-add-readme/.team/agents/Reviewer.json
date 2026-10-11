@@ -1,0 +1,21 @@
+{
+ "role": "Reviewer",
+ "pid": 166712,
+ "pane": "%2",
+ "model": "claude-fable-5-1",
+ "session": "ex",
+ "state": "idle",
+ "since": 1791678563.5065124,
+ "turn_id": "20261011_022819_8c5dfb:20261011_022819_8c5dfb:93bdb80b",
+ "task": null,
+ "blocked_kind": null,
+ "last_error": null,
+ "tokens_in": 269591,
+ "tokens_out": 770,
+ "turns": 4,
+ "heartbeat": 1791678619.4316354,
+ "started": 1791678499.4195573,
+ "plugin_version": "3.0.0",
+ "plugin_degraded": [],
+ "session_id": "20261011_022819_8c5dfb"
+}

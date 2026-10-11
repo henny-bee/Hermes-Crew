@@ -29,7 +29,7 @@ esac; done
 hermes_cmd() { if [ -x "$BIN/hermes" ]; then echo "$BIN/hermes"; else command -v hermes || true; fi; }
 # Hermes saves config.yaml atomically, which turns a shared-config symlink into a plain file:
 # let hermes-shared push the change to Windows and restore the link (no-op when not sharing).
-heal_links() { grep -qs "^WIN_HOME=" "$CONF" && [ -x "$BIN/hermes-shared" ] && "$BIN/hermes-shared" --version >/dev/null 2>&1 || true; }
+heal_links() { if grep -qs "^WIN_HOME=" "$CONF" && [ -x "$BIN/hermes-shared" ]; then "$BIN/hermes-shared" --version >/dev/null 2>&1 || true; fi; }
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -49,9 +49,14 @@ fi
 
 # 1) prerequisites
 for c in curl git; do command -v "$c" >/dev/null || die "'$c' is required (sudo apt install $c)"; done
-if ! command -v tmux >/dev/null || ! command -v flock >/dev/null; then
-  say "Installing tmux (needs sudo)"
-  sudo apt-get update -qq && sudo apt-get install -y -qq tmux util-linux
+if ! command -v tmux >/dev/null; then
+  if command -v apt-get >/dev/null; then
+    say "Installing tmux (needs sudo)"
+    sudo apt-get update -qq && sudo apt-get install -y -qq tmux
+  elif command -v brew >/dev/null; then   # macOS
+    say "Installing tmux (Homebrew)"
+    brew install tmux
+  else die "tmux is required (install it with your package manager)"; fi
 fi
 
 tv=$(tmux -V | grep -o '[0-9][0-9]*\.[0-9]*' | head -1 || true)   # empty for a git build: accept
@@ -106,7 +111,7 @@ for k in $SKILLS; do   # every skill under skill/, replaced as a whole
   cp -r "$HERE/skill/$k" "$HH/skills/autonomous-ai-agents/$k"
 done
 rm -rf "${HH:?}/plugins/$PLUGIN"; mkdir -p "$HH/plugins"; cp -r "$HERE/plugin/$PLUGIN" "$HH/plugins/$PLUGIN"
-find "$HH/plugins/$PLUGIN" -name __pycache__ -type d -prune -exec rm -rf {} +
+find "$HH/plugins/$PLUGIN" \( -name __pycache__ -o -name '*.egg-info' \) -type d -prune -exec rm -rf {} +
 HC=$(hermes_cmd)
 if [ -n "$HC" ] && "$HC" plugins enable "$PLUGIN" </dev/null; then heal_links
 else echo "WARNING: could not enable the plugin; run: hermes plugins enable $PLUGIN" >&2; fi

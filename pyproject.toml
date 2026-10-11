@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-crew"
+description = "Hermes Crew: tmux agent teams for Hermes - team state, mailbox, tasks, ownership guard and evidence."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dynamic = ["version"]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "ruff", "mypy", "hypothesis", "pyyaml"]
+
+# No [project.scripts]: bin/hermes-crew is the entry point (installed by install.sh). A console
+# script here would shadow the installed hermes-crew in any venv that puts its bin/ first on PATH.
+
+[tool.setuptools]
+package-dir = { "" = "plugin/hermes-crew" }
+
+[tool.setuptools.packages.find]
+where = ["plugin/hermes-crew"]
+include = ["hermes_crew*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "hermes_crew.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests/py"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+# sample projects the T60 example teams were given: must stay byte-identical, not ours to lint
+extend-exclude = ["examples/.harness/seed"]
+
+[tool.ruff.lint]
+# Explicit so results do not change with the ruff version's default rule set.
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
+# RUF001-003: deliberate non-ASCII (arrows, dashes) in user-facing text, docstrings and comments.
+# SIM108: a nested conditional expression is harder to read than the if/else block.
+ignore = ["RUF001", "RUF002", "RUF003", "SIM108"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["plugin/hermes-crew/hermes_crew"]
+# plugin/hermes-crew has an __init__.py (the Hermes adapter) but is not a valid package name:
+# resolve module names from mypy_path instead of crawling up for __init__.py files.
+mypy_path = "plugin/hermes-crew"
+explicit_package_bases = true

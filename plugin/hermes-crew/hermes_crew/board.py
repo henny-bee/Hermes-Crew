@@ -8,12 +8,15 @@ board.log is TSV, one entry per line: <time> <role> <KIND> <fields...>
   APPROVE  <relpath> <sha256[:12]> <what was checked>
 The lock file is `.team/board.log.lock` (the one the bash script uses), so both can run side by side.
 """
+
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from . import events, store
 from .team import Team, is_lead, same_role
@@ -29,7 +32,7 @@ def log_path(team: Team) -> Path:
     return team.path("board.log")
 
 
-def _lock(team: Team):
+def _lock(team: Team) -> contextlib.AbstractContextManager[None]:
     team.ensure()
     return store.flock(team.path("board.log.lock"))
 
@@ -39,18 +42,18 @@ def clean(text: str) -> str:
     return text.replace("\t", " ").replace("\n", " ")
 
 
-def rel(team: Team, path: str | os.PathLike) -> str:
+def rel(team: Team, path: str | os.PathLike[str]) -> str:
     """Path relative to the team dir, symlinks resolved, missing parts allowed (realpath -m)."""
     return os.path.relpath(os.path.realpath(path), team.root)
 
 
-def inside(team: Team, path: str | os.PathLike) -> bool:
+def inside(team: Team, path: str | os.PathLike[str]) -> bool:
     """True if `path` is inside the team dir and not under .team/."""
     r = rel(team, path)
     return not (r == ".." or r.startswith("../") or r == ".team" or r.startswith(".team/") or r == ".")
 
 
-def sha12(path: str | os.PathLike) -> str:
+def sha12(path: str | os.PathLike[str]) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 16), b""):
@@ -91,15 +94,23 @@ def owner_of(team: Team, relpath: str) -> str | None:
     return owners(team).get(relpath) or None
 
 
-def decisions(team: Team, ents: list[list[str]] | None = None) -> list[dict]:
+def decisions(team: Team, ents: list[list[str]] | None = None) -> list[dict[str, Any]]:
     """All decisions: {n, time, role, text, replaces (int|None), replaced_by (int|None)}."""
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for e in entries(team) if ents is None else ents:
         if _f(e, 2) != "DECIDE":
             continue
         rep = _f(e, 4)
-        out.append({"n": len(out) + 1, "time": _f(e, 0), "role": _f(e, 1), "text": _f(e, 3),
-                    "replaces": int(rep) if rep.isdigit() else None, "replaced_by": None})
+        out.append(
+            {
+                "n": len(out) + 1,
+                "time": _f(e, 0),
+                "role": _f(e, 1),
+                "text": _f(e, 3),
+                "replaces": int(rep) if rep.isdigit() else None,
+                "replaced_by": None,
+            }
+        )
     for d in out:
         r = d["replaces"]
         if r is not None and 1 <= r <= len(out):
@@ -107,20 +118,20 @@ def decisions(team: Team, ents: list[list[str]] | None = None) -> list[dict]:
     return out
 
 
-def current_decisions(team: Team) -> list[dict]:
+def current_decisions(team: Team) -> list[dict[str, Any]]:
     return [d for d in decisions(team) if d["replaced_by"] is None]
 
 
-def approvals(team: Team, relpath: str, ents: list[list[str]] | None = None) -> list[dict]:
+def approvals(team: Team, relpath: str, ents: list[list[str]] | None = None) -> list[dict[str, Any]]:
     """Latest approval per approver of `relpath`: {role, hash, evidence, time}."""
-    a: dict[str, dict] = {}
+    a: dict[str, dict[str, Any]] = {}
     for e in entries(team) if ents is None else ents:
         if _f(e, 2) == "APPROVE" and _f(e, 3) == relpath:
             a[_f(e, 1)] = {"role": _f(e, 1), "hash": _f(e, 4), "evidence": _f(e, 5), "time": _f(e, 0)}
     return list(a.values())
 
 
-def files(team: Team) -> list[dict]:
+def files(team: Team) -> list[dict[str, Any]]:
     """Every file ever owned or approved: {file, owner, hash, approvals[{role,hash,evidence,status}], ok}.
     status: OK | STALE | IGNORED (approver owns the file now)."""
     ents = entries(team)
@@ -173,8 +184,10 @@ def own(team: Team, role: str, *relpaths: str) -> list[str]:
         for r in relpaths:
             cur = o.get(r)
             if cur and not same_role(cur, role):
-                raise BoardError(f"REFUSED: {r} is owned by {cur} - ask {cur} (or lead) to run: "
-                                 f"hermes-team-board transfer {r} <Role>")
+                raise BoardError(
+                    f"REFUSED: {r} is owned by {cur} - ask {cur} (or lead) to run: "
+                    f"hermes-team-board transfer {r} <Role>"
+                )
         for r in relpaths:
             _put(team, role, "OWN", r)
     for r in relpaths:
@@ -222,6 +235,7 @@ def approve(team: Team, role: str, relpath: str, digest: str, evidence: str) -> 
 def pane_idle(pane: str, symbol: str | None = None) -> bool:
     """Port of bash pane_idle(): the Hermes classic REPL in `pane` sits at an EMPTY prompt."""
     from .team import tmux
+
     sym = symbol or os.environ.get("HERMES_TEAM_PROMPT_SYMBOL") or "❯"
     info = tmux("display", "-p", "-t", pane, "#{cursor_y} #{cursor_x} #{pane_in_mode}")
     if not info:
@@ -241,9 +255,7 @@ def pane_idle(pane: str, symbol: str | None = None) -> bool:
         return False
     if "/steer" in line or "Processing command" in line:
         return False
-    if re.match(r"^(\[[0-9]+\]|Allow|Deny)", line[len(m.group(0)):]):
-        return False
-    return True
+    return not re.match(r"^(\[[0-9]+\]|Allow|Deny)", line[len(m.group(0)) :])
 
 
 # ---------------------------------------------------------------- CLI (same text as the bash script)
@@ -260,13 +272,14 @@ def status_text(team: Team, pane: str | None = None) -> str:
     """The `status` output of the bash script."""
     from . import state
     from .team import tmux
+
     out = [f"== team ({team.root}) =="]
     win = tmux("display", "-p", "-t", pane, "#{session_name}:#{window_index}") if pane else None
     if win:
         panes = tmux("list-panes", "-t", win, "-F", "#{pane_id} #{@role} #{@model}") or ""
         for line in panes.splitlines():
             parts = line.split()
-            pid_, r, m = (parts + ["", "", ""])[:3]
+            pid_, r, m = ([*parts, "", "", ""])[:3]
             rec = state.read(team, r) if r else None
             if rec and state.is_alive(rec):
                 st = rec["state"]
@@ -285,8 +298,11 @@ def status_text(team: Team, pane: str | None = None) -> str:
     for f in files(team):
         out.append(f"  {f['file']:<40} owner={f['owner'] or '(none)'}")
         for a in f["approvals"]:
-            s = {"OK": "OK", "STALE": "STALE (file changed after approval)",
-                 "IGNORED": "ignored (approver owns the file now)"}[a["status"]]
+            s = {
+                "OK": "OK",
+                "STALE": "STALE (file changed after approval)",
+                "IGNORED": "ignored (approver owns the file now)",
+            }[a["status"]]
             out.append(f"      approved by {a['role']:<14} {s} - {a['evidence'][:90]}")
         if not f["owner"]:
             out.append("      !! no owner")
@@ -298,7 +314,9 @@ def status_text(team: Team, pane: str | None = None) -> str:
 def main(argv: list[str], team: Team | None = None, role: str | None = None) -> int:
     """`hermes-crew board ...` == `hermes-team-board ...`: same arguments, output and exit codes."""
     import sys
+
     from .team import current_role, my_pane
+
     pane = my_pane() if (team is None or role is None) else None
     team = team or Team.resolve()
     role = role or current_role(pane=pane)
@@ -349,8 +367,8 @@ def main(argv: list[str], team: Team | None = None, role: str | None = None) -> 
             if not args or not args[0]:
                 return usage()
             r = rel(team, args[0])
-            o = release(team, role, r)
-            print(f"{r} has no owner" if o is None else f"{r} released (was {o})")
+            was = release(team, role, r)
+            print(f"{r} has no owner" if was is None else f"{r} released (was {was})")
         elif cmd == "approve":
             f = args[0] if args else ""
             ev = clean(" ".join(args[1:]))

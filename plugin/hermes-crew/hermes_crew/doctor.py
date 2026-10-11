@@ -1,4 +1,5 @@
 """`hermes-crew doctor`: environment checks. Prints `OK|WARN|FAIL  <check>  <detail>`."""
+
 from __future__ import annotations
 
 import json
@@ -8,15 +9,16 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 
-from . import __version__, state
+from . import __version__, compat, state
 from .team import Team
 
 SKILLS = ("hermes-tmux-team", "hermes-tmux-teammate")
 
 
-def hermes_home(env=None) -> Path:
+def hermes_home(env: Mapping[str, str] | None = None) -> Path:
     env = os.environ if env is None else env
     return Path(env.get("HERMES_HOME") or Path(env.get("HOME") or Path.home()) / ".hermes")
 
@@ -50,7 +52,23 @@ def check_tmux() -> tuple[str, str, str]:
 
 def check_hermes() -> tuple[str, str, str]:
     p = shutil.which("hermes")
-    return ("OK", "hermes", p) if p else ("FAIL", "hermes", "not found on PATH (install Hermes Agent, or add ~/.local/bin to PATH)")
+    return (
+        ("OK", "hermes", p)
+        if p
+        else ("FAIL", "hermes", "not found on PATH (install Hermes Agent, or add ~/.local/bin to PATH)")
+    )
+
+
+def check_hermes_version(env: Mapping[str, str] | None = None) -> tuple[str, str, str]:
+    v = compat.installed_hermes_version(env)
+    if v is None:
+        return ("WARN", "hermes version", "cannot determine the installed Hermes version")
+    status = compat.status_for(v)
+    if status == "ok":
+        return ("OK", "hermes version", f"{v} (tested)")
+    if status == "broken":
+        return ("FAIL", "hermes version", f"{v} is known broken")
+    return ("WARN", "hermes version", f"{v} untested with hermes-crew {__version__}")
 
 
 def check_plugin(home: Path) -> tuple[str, str, str]:
@@ -131,8 +149,11 @@ def check_skills(home: Path) -> list[tuple[str, str, str]]:
     res = []
     for s in SKILLS:
         hits = sorted([*root.glob(f"{s}/SKILL.md"), *root.glob(f"*/{s}/SKILL.md")]) if root.is_dir() else []
-        res.append(("OK", f"skill {s}", str(hits[0].parent)) if hits
-                   else ("FAIL", f"skill {s}", f"not found under {root} (run install.sh)"))
+        res.append(
+            ("OK", f"skill {s}", str(hits[0].parent))
+            if hits
+            else ("FAIL", f"skill {s}", f"not found under {root} (run install.sh)")
+        )
     return res
 
 
@@ -154,14 +175,26 @@ def check_team(team: Team, now: float | None = None) -> list[tuple[str, str, str
         elif state.is_alive(a, now):
             res.append(("OK", f"agent {r}", f"alive, {a['state']}"))
         else:
-            res.append(("FAIL", f"agent {r}", f"not alive (pid {a.get('pid')}, last state {a['state']}) - "
-                        f"restart it or tell lead"))
+            res.append(
+                (
+                    "FAIL",
+                    f"agent {r}",
+                    f"not alive (pid {a.get('pid')}, last state {a['state']}) - restart it or tell lead",
+                )
+            )
     return res
 
 
-def run_checks(team: Team | None = None, env=None) -> list[tuple[str, str, str]]:
+def run_checks(team: Team | None = None, env: Mapping[str, str] | None = None) -> list[tuple[str, str, str]]:
     home = hermes_home(env)
-    res = [check_python(), check_tmux(), check_hermes(), check_plugin(home), check_enabled(home)]
+    res = [
+        check_python(),
+        check_tmux(),
+        check_hermes(),
+        check_hermes_version(env),
+        check_plugin(home),
+        check_enabled(home),
+    ]
     res += check_skills(home)
     res += check_team(team or Team.resolve())
     return res

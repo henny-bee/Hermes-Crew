@@ -1,4 +1,5 @@
 """Low-level file primitives: flock'd locks, JSONL append/read, atomic JSON write."""
+
 from __future__ import annotations
 
 import contextlib
@@ -7,8 +8,9 @@ import json
 import os
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 
 def now_iso(ts: float | None = None) -> str:
@@ -51,11 +53,11 @@ def append_line(path: Path | str, line: str) -> None:
         os.close(fd)
 
 
-def append_jsonl(path: Path | str, obj: dict) -> None:
+def append_jsonl(path: Path | str, obj: dict[str, Any]) -> None:
     append_line(path, dumps(obj))
 
 
-def read_jsonl(path: Path | str) -> list[dict]:
+def read_jsonl(path: Path | str) -> list[dict[str, Any]]:
     """All JSON objects in a JSONL file; missing file -> []; corrupt/partial lines are skipped."""
     try:
         text = Path(path).read_text(encoding="utf-8", errors="replace")

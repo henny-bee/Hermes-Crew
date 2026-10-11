@@ -1,0 +1,14 @@
+Hermes Crew · /tmp/example/proj                                      02:36:40
+AGENTS         state      for  task  tokens in/out  note
+  lead         idle       14s  -         300k/1.7k
+  Engineer     idle        1m  -         440k/3.1k
+  Reviewer     idle       53s  -         619k/1.9k
+TASKS (2 done)
+  T1   done        Engineer   P3 Migrate config to JSON, update app.…  verify ok
+  T2   done        Reviewer   P3 Review config migration, test parit…  verify ok
+FILES (owner · approvals)
+  ok app.py                             Engineer   OK Reviewer
+  ok config.json                        Engineer   OK Reviewer
+  ok migrate_config.py                  Engineer   OK Reviewer
+  ok tests/test_migration.py            Engineer   OK Reviewer
+DONE: yes - every task done, every owned file approved, verifies pass

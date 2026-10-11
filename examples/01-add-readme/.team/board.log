@@ -1,0 +1,2 @@
+2026-10-11T02:28:38	Engineer	OWN	README.md
+2026-10-11T02:29:12	Reviewer	APPROVE	README.md	deb10d52bebf	Verified CLI arguments, regex tokenization, default top 10, case sensitivity vs -i flag, stdin and file execution against wordfreq.py behavior and sample.txt

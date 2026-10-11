@@ -4,6 +4,10 @@
 # usage: hermes-tmux [hermes args...]
 export PATH="$HOME/.local/bin:$PATH"
 command -v tmux >/dev/null || { echo "tmux is not installed (sudo apt install tmux)" >&2; exit 1; }
+# real dir of this script, symlinks resolved portably (plain readlink: the GNU-only flag is missing on macOS)
+_s=$0; while [ -L "$_s" ]; do _l=$(readlink "$_s"); case $_l in /*) _s=$_l ;; *) _s=$(dirname "$_s")/$_l ;; esac; done; HT_BIN=$(cd "$(dirname "$_s")" && pwd -P)
+# shellcheck source=/dev/null  # hermes-team-lib, next to this script
+. "$HT_BIN/hermes-team-lib"
 # --cli: the classic REPL is what hermes-team-msg can type into (config may default to the TUI)
 # Env tells the hermes-crew plugin which team/role this Hermes is (it stays inert without it).
 if [ -n "$TMUX" ]; then   # already inside tmux: same setup, in the current pane
@@ -14,7 +18,7 @@ if [ -n "$TMUX" ]; then   # already inside tmux: same setup, in the current pane
 fi
 
 # <folder>-<hash of full path>: two folders with the same name must not share a session
-NAME="hermes-$(basename "$PWD" | tr -c 'A-Za-z0-9_\n-' '_')-$(printf %s "$PWD" | sha1sum | cut -c1-6)"
+NAME="hermes-$(basename "$PWD" | tr -c 'A-Za-z0-9_\n-' '_')-$(short_hash "$PWD")"
 if ! tmux has-session -t "$NAME" 2>/dev/null; then
   tmux new-session -d -s "$NAME" -c "$PWD" -x "$(tput cols 2>/dev/null || echo 200)" -y "$(tput lines 2>/dev/null || echo 50)" \
     "env HERMES_TEAM_DIR=$(printf %q "$PWD") HERMES_TEAM_ROLE=lead HERMES_CREW_SESSION=$NAME${HERMES_HOME:+ HERMES_HOME=$(printf %q "$HERMES_HOME")} hermes-shared --cli -s hermes-tmux-team${*:+ $(printf '%q ' "$@")}"   # preload the team skill for the lead

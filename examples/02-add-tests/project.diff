@@ -1,0 +1,67 @@
+diff --git a/tests/test_slugify.py b/tests/test_slugify.py
+new file mode 100644
+index 0000000..0ed00b3
+--- /dev/null
++++ b/tests/test_slugify.py
+@@ -0,0 +1,61 @@
++import unittest
++from slugify import slugify, parse_duration
++
++
++class TestSlugify(unittest.TestCase):
++    def test_basic_slugify(self):
++        self.assertEqual(slugify("Hello World"), "hello-world")
++
++    def test_special_characters(self):
++        self.assertEqual(slugify("Hello, World! 123"), "hello-world-123")
++
++    def test_multiple_spaces_and_punctuations(self):
++        self.assertEqual(slugify("  foo --- bar  baz!  "), "foo-bar-baz")
++
++    def test_empty_string(self):
++        self.assertEqual(slugify(""), "")
++
++    def test_only_special_characters(self):
++        self.assertEqual(slugify("!@#$%^&*()_+"), "")
++
++    def test_max_len_truncation(self):
++        self.assertEqual(slugify("hello world", max_len=5), "hello")
++        self.assertEqual(slugify("hello world", max_len=7), "hello-w")
++
++    def test_max_len_none(self):
++        self.assertEqual(slugify("hello world", max_len=None), "hello-world")
++
++    def test_alphanumeric_kept(self):
++        self.assertEqual(slugify("item42 test99"), "item42-test99")
++
++
++class TestParseDuration(unittest.TestCase):
++    def test_single_units(self):
++        self.assertEqual(parse_duration("45s"), 45)
++        self.assertEqual(parse_duration("10m"), 600)
++        self.assertEqual(parse_duration("2h"), 7200)
++        self.assertEqual(parse_duration("1d"), 86400)
++
++    def test_compound_durations(self):
++        self.assertEqual(parse_duration("1h30m"), 5400)
++        self.assertEqual(parse_duration("2d4h15m30s"), 2 * 86400 + 4 * 3600 + 15 * 60 + 30)
++
++    def test_invalid_durations(self):
++        invalid_cases = [
++            "",
++            "bad",
++            "1x",
++            "1h30",
++            "10",
++            "1h 30m",
++            "-5s",
++            "1.5h",
++        ]
++        for case in invalid_cases:
++            with self.subTest(case=case):
++                with self.assertRaises(ValueError):
++                    parse_duration(case)
++
++
++if __name__ == "__main__":
++    unittest.main()

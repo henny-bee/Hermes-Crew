@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 import multiprocessing as mp
 
-import pytest
-
 import mp_workers
+import pytest
 from hermes_crew import events, mailbox, tasks
 from hermes_crew.tasks import TaskError
 
@@ -22,11 +21,14 @@ def test_add_ids_and_fold(team):
     assert [e["kind"] for e in events.read(team, kind="task.")] == ["task.add", "task.add"]
 
 
-@pytest.mark.parametrize("kw,msg", [
-    ({"deps": ["T9"]}, "unknown dependency T9"),
-    ({"priority": 0}, "priority must be >= 1"),
-    ({"priority": "x"}, "must be a number"),
-])
+@pytest.mark.parametrize(
+    "kw,msg",
+    [
+        ({"deps": ["T9"]}, "unknown dependency T9"),
+        ({"priority": 0}, "priority must be >= 1"),
+        ({"priority": "x"}, "must be a number"),
+    ],
+)
 def test_add_rejects(team, kw, msg):
     tasks.add(team, "lead", "a")
     with pytest.raises(TaskError, match=msg):
@@ -54,7 +56,7 @@ def test_claim_rules(team):
     tasks.claim(team, "Eng", "T1")
     with pytest.raises(TaskError, match="REFUSED: T1 is claimed by Eng - ask Eng or lead"):
         tasks.claim(team, "Rev", "T1")
-    assert tasks.claim(team, "eng", "T1")["owner"] == "Eng"     # idempotent for the owner
+    assert tasks.claim(team, "eng", "T1")["owner"] == "Eng"  # idempotent for the owner
     with pytest.raises(TaskError, match="no task T7"):
         tasks.claim(team, "Eng", "T7")
     with pytest.raises(TaskError, match="not a task id"):
@@ -91,11 +93,11 @@ def test_done_notifies_newly_ready(team):
     tasks.add(team, "lead", "a", owner="Eng")
     tasks.add(team, "lead", "b", owner="Eng")
     tasks.add(team, "lead", "c", deps=["T1", "T2"], owner="Rev")
-    tasks.add(team, "lead", "d", deps=["T1"])                       # unowned -> lead
+    tasks.add(team, "lead", "d", deps=["T1"])  # unowned -> lead
     tasks.done(team, "Eng", "T1")
     lead_msgs = [m["body"] for m in mailbox.pending(team, "lead")]
     assert lead_msgs == ["T4 'd' is unblocked (deps done: T1) - it has no owner: hermes-crew task assign T4 <Role>"]
-    assert mailbox.pending(team, "Rev") == []                      # T3 still waits for T2
+    assert mailbox.pending(team, "Rev") == []  # T3 still waits for T2
     tasks.done(team, "Eng", "T2")
     rev = [m["body"] for m in mailbox.pending(team, "Rev")]
     assert rev == ["T3 'c' is unblocked (deps done: T1, T2). Start it: hermes-crew task start T3"]
@@ -123,13 +125,13 @@ def test_orphan(team):
     assert tasks.orphan_tasks_of(team, "hermes-crew", "eng", "Eng died") == ["T1"]
     t = tasks.get(team, "T1")
     assert t["status"] == "orphaned" and t["owner"] is None and t["prev_owner"] == "Eng"
-    assert tasks.orphan(team, "lead", "T3", "x") is None                # unowned: no-op
-    assert tasks.claim(team, "Rev", "T1")["owner"] == "Rev"             # orphaned can be claimed
+    assert tasks.orphan(team, "lead", "T3", "x") is None  # unowned: no-op
+    assert tasks.claim(team, "Rev", "T1")["owner"] == "Rev"  # orphaned can be claimed
 
 
 def test_assign(team):
     tasks.add(team, "lead", "a")
-    assert tasks.assign(team, "Rev", "T1", "Eng")["status"] == "claimed"   # unowned: anyone may propose
+    assert tasks.assign(team, "Rev", "T1", "Eng")["status"] == "claimed"  # unowned: anyone may propose
     with pytest.raises(TaskError, match="only Eng or lead can reassign"):
         tasks.assign(team, "Rev", "T1", "Rev")
     assert tasks.assign(team, "lead", "T1", "Rev")["owner"] == "Rev"
@@ -156,8 +158,10 @@ def test_concurrent_claim_one_winner(team, tmp_path):
     ctx = mp.get_context("spawn")
     for tid in ("T1", "T2", "T3", "T4"):
         outs = [tmp_path / f"{tid}-{i}.json" for i in range(4)]
-        ps = [ctx.Process(target=mp_workers.claim_task, args=(str(team.root), f"R{i}", tid, str(o)))
-              for i, o in enumerate(outs)]
+        ps = [
+            ctx.Process(target=mp_workers.claim_task, args=(str(team.root), f"R{i}", tid, str(o)))
+            for i, o in enumerate(outs)
+        ]
         for p in ps:
             p.start()
         for p in ps:
@@ -178,5 +182,5 @@ def test_done_with_note(team, tmp_path):
     assert t["handoff"] == ".team/handoff/T1.md"
     assert team.path("handoff", "T1.md").read_text() == "parser done.\nedge cases: see tests/test_x.py\n"
     assert tasks.handoff_text(team, t).startswith("parser done.")
-    assert list(team.root.iterdir()) == [team.dir]          # nothing written into the project
+    assert list(team.root.iterdir()) == [team.dir]  # nothing written into the project
     assert tasks.handoff_text(team, tasks.get(team, "T2")) is None

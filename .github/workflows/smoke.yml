@@ -1,0 +1,53 @@
+name: smoke
+
+# Does the plugin still work with a real, pinned Hermes? Separate from ci.yml on purpose: it needs
+# network and a third-party install, so for the first release a red run is informational only.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "plugin/**"
+      - "install.sh"
+      - "tests/smoke/**"
+      - ".github/workflows/smoke.yml"
+  schedule:
+    - cron: "17 5 * * 1" # weekly: catches upstream Hermes changes
+  workflow_dispatch:
+    inputs:
+      hermes_version:
+        description: "hermes-agent version on PyPI to test against"
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  # Pinned Hermes release from PyPI (upstream does not support building from git, and PyPI's newest
+  # release, 0.19.0, is older than the 0.21.x git installs the plugin is also developed against).
+  # A version tested here belongs in hermes_crew.compat.KNOWN as "ok"; doctor reports any other as untested.
+  HERMES_AGENT_VERSION: ${{ inputs.hermes_version || '0.19.0' }}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    continue-on-error: true # first release: informational (see header)
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Install tmux
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux
+      - name: Install pinned hermes-agent
+        run: |
+          python -m venv "$RUNNER_TEMP/hermes-venv"
+          "$RUNNER_TEMP/hermes-venv/bin/pip" install --quiet "hermes-agent==${HERMES_AGENT_VERSION}"
+          echo "$RUNNER_TEMP/hermes-venv/bin" >> "$GITHUB_PATH"
+      - name: Hermes version
+        run: hermes --version
+      - name: Smoke test (temp HERMES_HOME, temp team dir, no model calls)
+        env:
+          HERMES_SMOKE_REQUIRE: "1"
+        run: bash tests/smoke/run.sh

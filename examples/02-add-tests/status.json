@@ -1,0 +1,186 @@
+{
+ "team": "/tmp/example/proj",
+ "time": "2026-10-11T02:32:56",
+ "agents": [
+  {
+   "role": "lead",
+   "pid": 170163,
+   "pane": "%0",
+   "model": "claude-fable-5-1",
+   "session": "ex",
+   "state": "idle",
+   "since": 1791678721.6571474,
+   "turn_id": "20261011_023057_b41f27:20261011_023057_b41f27:b8c55023",
+   "task": null,
+   "blocked_kind": null,
+   "last_error": null,
+   "tokens_in": 256261,
+   "tokens_out": 1285,
+   "turns": 3,
+   "heartbeat": 1791678761.6831517,
+   "started": 1791678656.6643384,
+   "plugin_version": "3.0.0",
+   "plugin_degraded": [],
+   "session_id": "20261011_023057_b41f27",
+   "alive": true,
+   "dead": false,
+   "for_s": 54.8
+  },
+  {
+   "role": "Engineer",
+   "pid": 170697,
+   "pane": "%1",
+   "model": "claude-fable-5-1",
+   "session": "ex",
+   "state": "idle",
+   "since": 1791678711.7902954,
+   "turn_id": "20261011_023110_96697f:20261011_023110_96697f:a30d8b5b",
+   "task": null,
+   "blocked_kind": null,
+   "last_error": null,
+   "tokens_in": 229642,
+   "tokens_out": 1301,
+   "turns": 2,
+   "heartbeat": 1791678775.130783,
+   "started": 1791678670.1203501,
+   "plugin_version": "3.0.0",
+   "plugin_degraded": [],
+   "session_id": "20261011_023110_96697f",
+   "alive": true,
+   "dead": false,
+   "for_s": 64.7
+  },
+  {
+   "role": "Reviewer",
+   "pid": 170784,
+   "pane": "%2",
+   "model": "claude-fable-5-1",
+   "session": "ex",
+   "state": "idle",
+   "since": 1791678716.8518448,
+   "turn_id": "20261011_023110_df680c:20261011_023110_df680c:cc8f8b47",
+   "task": null,
+   "blocked_kind": null,
+   "last_error": null,
+   "tokens_in": 162964,
+   "tokens_out": 461,
+   "turns": 3,
+   "heartbeat": 1791678775.6544366,
+   "started": 1791678670.645428,
+   "plugin_version": "3.0.0",
+   "plugin_degraded": [],
+   "session_id": "20261011_023110_df680c",
+   "alive": true,
+   "dead": false,
+   "for_s": 59.6
+  }
+ ],
+ "tasks": [
+  {
+   "id": "T1",
+   "title": "Write unit tests for slugify.py",
+   "deps": [],
+   "priority": 3,
+   "owner": "Engineer",
+   "desc": "Write unit tests for slugify.py in tests/test_slugify.py using standard library unittest only (no pip installs). Cover slugify (normal text, punctuation, max_len) and parse_duration (valid and invalid input). Run python -m unittest discover -s tests -v through hermes-crew verify so the result is recorded. If a test shows a real bug in slugify.py, do NOT edit slugify.py: tell the lead what you found.",
+   "status": "done",
+   "created_by": "lead",
+   "created": "2026-10-11T02:31:11",
+   "updated": "2026-10-11T02:31:42",
+   "reason": null,
+   "handoff": ".team/handoff/T1.md",
+   "prev_owner": null,
+   "waiting_on": [],
+   "ready": true,
+   "verify": {
+    "exit": 0,
+    "cmd": "python3 -m unittest discover tests",
+    "t": "2026-10-11T02:31:37",
+    "by": "Engineer",
+    "duration_s": 0.05
+   }
+  },
+  {
+   "id": "T2",
+   "title": "Review tests/test_slugify.py and verify test suite",
+   "deps": [
+    "T1"
+   ],
+   "priority": 3,
+   "owner": "Reviewer",
+   "desc": "Read tests/test_slugify.py and slugify.py, run the tests yourself (hermes-crew verify python -m unittest discover -s tests -v), and decide whether the tests are meaningful (they must assert behaviour, not just call the functions). Approve the test file with hermes-crew board approve tests/test_slugify.py '<what was checked>', or send Engineer a short list of fixes.",
+   "status": "done",
+   "created_by": "lead",
+   "created": "2026-10-11T02:31:13",
+   "updated": "2026-10-11T02:31:52",
+   "reason": null,
+   "handoff": ".team/handoff/T2.md",
+   "prev_owner": null,
+   "waiting_on": [],
+   "ready": true,
+   "verify": {
+    "exit": 0,
+    "cmd": "python -m unittest discover -s tests -v",
+    "t": "2026-10-11T02:31:48",
+    "by": "Reviewer",
+    "duration_s": 0.05
+   }
+  }
+ ],
+ "files": [
+  {
+   "file": "tests/test_slugify.py",
+   "owner": "Engineer",
+   "hash": "8120dd105bad",
+   "approvals": [
+    {
+     "role": "Reviewer",
+     "hash": "8120dd105bad",
+     "evidence": "Verified comprehensive unit tests covering slugify and parse_duration with boundary, formatting, truncation, and invalid input cases; all 11 tests pass.",
+     "time": "2026-10-11T02:31:50",
+     "status": "OK"
+    }
+   ],
+   "ok": true
+  }
+ ],
+ "decisions": [],
+ "done_check": [],
+ "metrics": {
+  "tasks": {
+   "T1": {
+    "claimed": "2026-10-11T02:31:11",
+    "done": "2026-10-11T02:31:42",
+    "wall_s": 31.4,
+    "reopens": 0
+   },
+   "T2": {
+    "claimed": "2026-10-11T02:31:13",
+    "done": "2026-10-11T02:31:52",
+    "wall_s": 38.9,
+    "reopens": 0
+   }
+  },
+  "roles": {
+   "lead": {
+    "tokens_in": 256261,
+    "tokens_out": 1285
+   },
+   "Engineer": {
+    "tokens_in": 229642,
+    "tokens_out": 1301
+   },
+   "Reviewer": {
+    "tokens_in": 162964,
+    "tokens_out": 461
+   }
+  },
+  "totals": {
+   "tasks_timed": 2,
+   "wall_s": 70.3,
+   "reopens": 0,
+   "tokens_in": 648867,
+   "tokens_out": 3047
+  }
+ }
+}

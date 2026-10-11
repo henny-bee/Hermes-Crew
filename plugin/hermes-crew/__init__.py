@@ -8,27 +8,32 @@
 * heartbeat        daemon thread, every 15 s
 * mail delivery    daemon thread, every 1 s — injects pending mailbox messages as ONE turn, and
                    only while this agent is idle (``inject_message`` interrupts a busy turn)
-* ownership guard  pre_tool_call (see hermes_crew/guard.py)
+* ownership guard  pre_tool_call (see hermes_crew/guard/)
 * watchdog         lead only, daemon thread, every 20 s (see hermes_crew/watchdog.py)
 
 Inert unless both HERMES_TEAM_DIR and HERMES_TEAM_ROLE are set. No callback ever raises: a
 raising ``pre_tool_call`` would block the tool, so every hook is wrapped and logs instead.
 Thread loops call ``*_tick()`` methods that tests drive directly.
 """
+
 from __future__ import annotations
 
 import atexit
 import functools
+import itertools
 import json
 import logging
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .hermes_crew import __version__, board, events, guard, mailbox, state, tasks, watchdog
+from .hermes_crew.guard.tokenize import SEPARATORS, WRITE_REDIRS
 from .hermes_crew.team import SYSTEM, Team, same_role
 
 log = logging.getLogger("hermes_crew")
@@ -36,22 +41,28 @@ log = logging.getLogger("hermes_crew")
 HEARTBEAT_S = 15.0
 MAIL_S = 1.0
 WATCHDOG_S = 20.0
-STARTUP_GRACE_S = 30.0       # deliver mail only after the first turn (the brief) started, or after this
-INJECT_SETTLE_S = 30.0       # after an inject, wait for its turn to start before injecting again
+STARTUP_GRACE_S = 30.0  # deliver mail only after the first turn (the brief) started, or after this
+UNPARSED_EVERY_S = 60.0  # at most one board.unparsed event per agent per minute
+UNPARSED_CLIP = 300  # chars of the raw command kept in the event
+INTERPRETERS = ("python", "python3", "perl", "ruby", "node", "sh", "bash")
+INJECT_SETTLE_S = 30.0  # after an inject, wait for its turn to start before injecting again
 ERROR_MAX = 200
 
 
 def _safe(default: Any = None) -> Callable:
     """Decorator: never let an exception escape a hook/tick; log it and return ``default``."""
+
     def deco(fn: Callable) -> Callable:
         @functools.wraps(fn)
         def wrapper(*a, **kw):
             try:
                 return fn(*a, **kw)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("hermes-crew: %s failed", fn.__name__)
                 return default
+
         return wrapper
+
     return deco
 
 
@@ -70,12 +81,29 @@ def _int(v: Any) -> int:
 class CrewPlugin:
     """One agent's view of the team. Hook methods are named after the Hermes hooks."""
 
-    HOOKS = ("on_session_start", "pre_llm_call", "on_session_end", "on_session_finalize",
-             "on_session_reset", "on_human_input_request", "on_human_input_resolved",
-             "post_api_request", "api_request_error", "pre_tool_call", "post_tool_call")
+    HOOKS = (
+        "on_session_start",
+        "pre_llm_call",
+        "on_session_end",
+        "on_session_finalize",
+        "on_session_reset",
+        "on_human_input_request",
+        "on_human_input_resolved",
+        "post_api_request",
+        "api_request_error",
+        "pre_tool_call",
+        "post_tool_call",
+    )
 
-    def __init__(self, ctx: Any, team: Team, role: str, *, clock: Callable[[], float] = time.time,
-                 tmux_runner: Callable[[list[str]], Any] | None = None):
+    def __init__(
+        self,
+        ctx: Any,
+        team: Team,
+        role: str,
+        *,
+        clock: Callable[[], float] = time.time,
+        tmux_runner: Callable[[list[str]], Any] | None = None,
+    ):
         self.ctx = ctx
         self.team = team
         self.role = role
@@ -84,15 +112,18 @@ class CrewPlugin:
         self.auto_own = os.environ.get("HERMES_CREW_AUTO_OWN", "1") != "0"
         self.lock = threading.RLock()
         self.state = "starting"
-        self.turn_seen = False             # first pre_llm_call (the --query-file brief) happened
+        self.turn_seen = False  # first pre_llm_call (the --query-file brief) happened
         self.started = clock()
-        self.injected_at: float | None = None   # inject accepted, its turn not started yet
-        self.cwd: str | None = None        # terminal session cwd, learned from terminal results
+        self.injected_at: float | None = None  # inject accepted, its turn not started yet
+        self.cwd: str | None = None  # terminal session cwd, learned from terminal results
         self.stop = threading.Event()
         self.threads: list[threading.Thread] = []
         self.tmux_runner = tmux_runner or _run_tmux
         self._owners_key: tuple | None = None
         self._owners: dict[str, str] = {}
+        self.degraded: list[str] = []  # hooks / ctx methods this Hermes lacks (register_hooks)
+        self._unparsed_at: float | None = None  # last board.unparsed event (rate limit)
+        self._unparsed_suppressed = 0
 
     # ------------------------------------------------------------------ state
     def _set(self, new_state: str | None = None, **fields: Any) -> None:
@@ -105,20 +136,29 @@ class CrewPlugin:
             if new_state:
                 changes["state"] = new_state
             state.update(self.team, self.role, **changes)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("hermes-crew: writing agent state failed")
 
     def _emit(self, kind: str, **fields: Any) -> None:
         try:
             events.emit(self.team, self.role, kind, **fields)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("hermes-crew: event %s failed", kind)
 
     def start_record(self) -> None:
         now = self.clock()
-        self._set("starting", pid=os.getpid(), pane=os.environ.get("TMUX_PANE"),
-                  session=os.environ.get("HERMES_CREW_SESSION"), started=now, heartbeat=now,
-                  plugin_version=__version__, turn_id=None, blocked_kind=None, last_error=None)
+        self._set(
+            "starting",
+            pid=os.getpid(),
+            pane=os.environ.get("TMUX_PANE"),
+            session=os.environ.get("HERMES_CREW_SESSION"),
+            started=now,
+            heartbeat=now,
+            plugin_version=__version__,
+            turn_id=None,
+            blocked_kind=None,
+            last_error=None,
+        )
 
     # ------------------------------------------------------------------ hooks
     @_safe()
@@ -227,7 +267,7 @@ class CrewPlugin:
     def pre_tool_call(self, **kw: Any) -> dict | None:
         try:
             return self._guard(kw.get("tool_name"), kw.get("args"))
-        except Exception:  # noqa: BLE001 - a raising pre_tool_call would block the tool
+        except Exception:  # a raising pre_tool_call would block the tool
             log.exception("hermes-crew: guard failed (allowing the tool call)")
             return None
 
@@ -252,12 +292,20 @@ class CrewPlugin:
         if tool not in guard.FILE_TOOLS and tool not in guard.TERMINAL_TOOLS:
             return None
         owners = self.owners()
-        d = guard.evaluate(str(tool), args if isinstance(args, dict) else {},
-                           team_dir=str(self.team.root), role=self.role, owners=owners,
-                           cwd=self._base_cwd(), auto_own=self.auto_own)
+        d = guard.evaluate(
+            str(tool),
+            args if isinstance(args, dict) else {},
+            team_dir=str(self.team.root),
+            role=self.role,
+            owners=owners,
+            cwd=self._base_cwd(),
+            auto_own=self.auto_own,
+        )
         if d.blocked:
             self._emit("board.blocked", tool=tool, message=d.message)
             return d.hook_result()
+        if tool in guard.TERMINAL_TOOLS and isinstance(args, dict) and isinstance(args.get("command"), str):
+            self._note_unparsed(args["command"], args.get("workdir") or self._base_cwd())
         for rel in d.claim:
             owner = _board_claim(self.team, self.role, rel)
             if owner and not same_role(owner, self.role):
@@ -266,13 +314,26 @@ class CrewPlugin:
                 return {"action": "block", "message": msg}
         return None
 
+    def _note_unparsed(self, command: str, cwd: Any) -> None:
+        """Allowed by uncertainty: the command looks like it writes (a write redirection, sed -i,
+        an interpreter -c/-e, $(...) or backticks) but the guard found no target it could check.
+        Emits a rate-limited ``board.unparsed`` event so this blind spot is visible."""
+        if not _writeish(command) or guard.command_targets(command, cwd if isinstance(cwd, str) else None):
+            return
+        now = self.clock()
+        if self._unparsed_at is not None and now - self._unparsed_at < UNPARSED_EVERY_S:
+            self._unparsed_suppressed += 1
+            return
+        self._emit("board.unparsed", command=command[:UNPARSED_CLIP], suppressed=self._unparsed_suppressed)
+        self._unparsed_at, self._unparsed_suppressed = now, 0
+
     # ------------------------------------------------------------------ ticks
     def heartbeat_tick(self) -> None:
         if self.state == "exited":
             return
         try:
             state.heartbeat(self.team, self.role, os.getpid())
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("hermes-crew: heartbeat failed")
 
     def deliverable(self, now: float | None = None) -> bool:
@@ -281,9 +342,7 @@ class CrewPlugin:
             return False
         if not self.turn_seen and now - self.started < STARTUP_GRACE_S:
             return False
-        if self.injected_at is not None and now - self.injected_at < INJECT_SETTLE_S:
-            return False
-        return True
+        return not (self.injected_at is not None and now - self.injected_at < INJECT_SETTLE_S)
 
     @_safe(default=0)
     def mail_tick(self, now: float | None = None) -> int:
@@ -294,6 +353,8 @@ class CrewPlugin:
             self._set("idle")
         if not self.deliverable(now) or not mailbox.pending(self.team, self.role):
             return 0
+        if "inject_message" in self.degraded:  # no way to deliver: mail stays pending (status shows WARN)
+            return 0
         with self.lock:
             if not self.deliverable(now):
                 return 0
@@ -303,7 +364,7 @@ class CrewPlugin:
             ok = False
             try:
                 ok = bool(self.ctx.inject_message(mailbox.render(msgs)))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("hermes-crew: inject_message failed")
             if not ok:
                 for m in msgs:
@@ -320,15 +381,15 @@ class CrewPlugin:
         expired = mailbox.expire(self.team, now)
         agents = state.all_agents(self.team)
         task_list = _task_list(self.team)
-        escs = watchdog.check(now, agents, task_list, unapproved=_unapproved(self.team),
-                              expired=expired, lead=self.role)
+        escs = watchdog.check(
+            now, agents, task_list, unapproved=_unapproved(self.team), expired=expired, lead=self.role
+        )
         new = watchdog.filter_new(self.team, escs)
         for e in new:
             for tid in e.orphan_tasks:
                 _orphan(self.team, tid, f"{e.role} died")
             mailbox.send(self.team, SYSTEM, self.role, e.text)
-            events.emit(self.team, SYSTEM, "escalation", esc=e.kind, key=e.key, about=e.role,
-                        text=e.text[:500])
+            events.emit(self.team, SYSTEM, "escalation", esc=e.kind, key=e.key, about=e.role, text=e.text[:500])
             self._display(e.text)
         return new
 
@@ -342,7 +403,7 @@ class CrewPlugin:
         args.append(("hermes-crew: " + first).replace("#", "##")[:200])
         try:
             self.tmux_runner(args)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("hermes-crew: tmux display-message failed", exc_info=True)
 
     def mark_exited(self, reason: str = "exit") -> None:
@@ -353,13 +414,37 @@ class CrewPlugin:
         self._emit("agent.exit", reason=reason)
 
     # ------------------------------------------------------------------ wiring
-    def register_hooks(self) -> None:
+    def register_hooks(self) -> list[str]:
+        """Register every hook and probe what this Hermes lacks: a hook whose registration raises or
+        that is not in Hermes' VALID_HOOKS, and a missing ``ctx.inject_message``. The result is
+        recorded as ``plugin_degraded`` in agents/<Role>.json and logged once; never silent."""
+        valid = _valid_hooks(self.ctx)
+        missing = []
         for name in self.HOOKS:
-            self.ctx.register_hook(name, getattr(self, name))
+            try:
+                self.ctx.register_hook(name, getattr(self, name))
+            except Exception:
+                missing.append(name)
+                continue
+            if valid is not None and name not in valid:
+                missing.append(name)
+        if not callable(getattr(self.ctx, "inject_message", None)):
+            missing.append("inject_message")
+        self.degraded = missing
+        self._set(plugin_degraded=missing)
+        if missing:
+            log.warning(
+                "hermes-crew: degraded mode, this Hermes lacks: %s (see docs/hermes-api-contract.md)",
+                ", ".join(missing),
+            )
+            self._emit("plugin.degraded", missing=missing)
+        return missing
 
     def start_threads(self) -> None:
-        loops = [("hermes-crew-heartbeat", HEARTBEAT_S, self.heartbeat_tick),
-                 ("hermes-crew-mail", MAIL_S, self.mail_tick)]
+        loops = [
+            ("hermes-crew-heartbeat", HEARTBEAT_S, self.heartbeat_tick),
+            ("hermes-crew-mail", MAIL_S, self.mail_tick),
+        ]
         if self.is_lead:
             loops.append(("hermes-crew-watchdog", WATCHDOG_S, self.watchdog_tick))
         for name, every, tick in loops:
@@ -371,11 +456,46 @@ class CrewPlugin:
         while not self.stop.wait(every):
             try:
                 tick()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("hermes-crew: %s tick failed", threading.current_thread().name)
 
 
 # ---------------------------------------------------------------------- core shims
+
+
+def _writeish(command: str) -> bool:
+    """Does the command contain a token that usually means a file write?"""
+    words = guard.tokenize(command)
+    for k, w in enumerate(words):
+        nxt = words[k + 1].text if k + 1 < len(words) else ""
+        if w.op:
+            if w.text in WRITE_REDIRS and not (w.text == ">&" and (nxt.isdigit() or nxt == "-")):
+                return True
+            continue
+        if w.dynamic and ("$(" in w.text or "`" in w.text):
+            return True
+        name = os.path.basename(w.text)
+        seg = list(itertools.takewhile(lambda x: not (x.op and x.text in SEPARATORS), words[k + 1 :]))
+        if name in guard.EXTRACTORS and any(x.dynamic for x in seg):  # e.g. tee "$f", cp x "$DST"
+            return True
+        if name == "sed" and any(_sed_in_place(x.text) for x in words[k + 1 :]):
+            return True
+        if name in INTERPRETERS and nxt in ("-c", "-e"):
+            return True
+    return False
+
+
+def _sed_in_place(opt: str) -> bool:
+    return opt.startswith("--in-place") or (opt.startswith("-") and not opt.startswith("--") and "i" in opt)
+
+
+def _valid_hooks(ctx: Any) -> frozenset[str] | None:
+    """Hermes' ``VALID_HOOKS`` (hermes_cli/plugins.py, the module of PluginContext), or None when it
+    cannot be found: ``register_hook`` only warns on unknown names, so this is how to detect them."""
+    mods = (sys.modules.get(type(ctx).__module__), sys.modules.get("hermes_cli.plugins"))
+    valid = next((v for v in (getattr(m, "VALID_HOOKS", None) for m in mods) if v is not None), None)
+    return frozenset(valid) if isinstance(valid, (set, frozenset, list, tuple)) else None
+
 
 def _board_owners(team: Team) -> dict[str, str]:
     return dict(board.owners(team))
@@ -403,7 +523,7 @@ def _unapproved(team: Team) -> list[tuple[str, str]]:
 def _orphan(team: Team, task_id: str, reason: str) -> None:
     try:
         tasks.orphan(team, SYSTEM, task_id, reason)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("hermes-crew: orphaning %s failed", task_id)
 
 
@@ -413,6 +533,7 @@ def _run_tmux(args: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------- entry point
+
 
 def register(ctx: Any, *, start_threads: bool = True) -> CrewPlugin | None:
     """Hermes entry point. Returns the plugin object (Hermes ignores it; tests use it)."""
@@ -429,6 +550,6 @@ def register(ctx: Any, *, start_threads: bool = True) -> CrewPlugin | None:
             plugin.start_threads()
             atexit.register(_safe()(plugin.mark_exited), "process exit")
         return plugin
-    except Exception:  # noqa: BLE001 - never break Hermes startup
+    except Exception:  # never break Hermes startup
         log.exception("hermes-crew: register failed; plugin inactive")
         return None

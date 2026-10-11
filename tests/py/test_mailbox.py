@@ -10,13 +10,13 @@ from hermes_crew import events, mailbox
 def test_send_pending_claim(team):
     m1 = mailbox.send(team, "lead", "Eng", "line1\nline2 with 'quotes' $(x) `y`")
     m2 = mailbox.send(team, "Planner", "Eng", "second")
-    assert m1["id"] < m2["id"]                               # sortable ids
+    assert m1["id"] < m2["id"]  # sortable ids
     assert [m["id"] for m in mailbox.pending(team, "Eng")] == [m1["id"], m2["id"]]
     assert not list((mailbox.box(team, "Eng") / "tmp").iterdir())
     got = mailbox.claim_all(team, "Eng")
     assert [m["body"] for m in got] == [m1["body"], "second"]
     assert mailbox.pending(team, "Eng") == []
-    assert mailbox.claim(team, "Eng", m1["id"]) is None       # already taken
+    assert mailbox.claim(team, "Eng", m1["id"]) is None  # already taken
     assert [m["id"] for m in mailbox.delivered(team, "Eng")] == [m1["id"], m2["id"]]
     assert events.read(team, kind="msg.queued")[0]["to"] == "Eng"
 

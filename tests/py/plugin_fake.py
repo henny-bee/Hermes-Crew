@@ -1,4 +1,5 @@
 """Helpers for plugin adapter tests: load the plugin like Hermes does, and a fake PluginContext."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -15,7 +16,8 @@ def load_plugin():
     if MODULE_NAME in sys.modules:
         return sys.modules[MODULE_NAME]
     spec = importlib.util.spec_from_file_location(
-        MODULE_NAME, PLUGIN_DIR / "__init__.py", submodule_search_locations=[str(PLUGIN_DIR)])
+        MODULE_NAME, PLUGIN_DIR / "__init__.py", submodule_search_locations=[str(PLUGIN_DIR)]
+    )
     mod = importlib.util.module_from_spec(spec)
     sys.modules[MODULE_NAME] = mod
     spec.loader.exec_module(mod)

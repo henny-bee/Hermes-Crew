@@ -16,8 +16,10 @@ if [ "$1" = "--models" ]; then
   else echo "only the default model (set HERMES_TEAM_MODELS in $CONF to enable model diversity)"; fi
   exit 0
 fi
+# real dir of this script, symlinks resolved portably (plain readlink: the GNU-only flag is missing on macOS)
+_s=$0; while [ -L "$_s" ]; do _l=$(readlink "$_s"); case $_l in /*) _s=$_l ;; *) _s=$(dirname "$_s")/$_l ;; esac; done; HT_BIN=$(cd "$(dirname "$_s")" && pwd -P)
 # shellcheck source=/dev/null  # hermes-team-lib, next to this script
-. "$(dirname "$(readlink -f "$0")")/hermes-team-lib"
+. "$HT_BIN/hermes-team-lib"
 
 LEAD=$(my_pane) || { echo "ERROR: Hermes is not running inside tmux. Ask the user to start it with 'hermes-wsl' (Windows) or 'hermes-tmux' (Linux/WSL)." >&2; exit 1; }
 WIN=$(tmux display -p -t "$LEAD" '#{session_name}:#{window_index}')
@@ -43,7 +45,7 @@ relayout() { tmux set -w -t "$WIN" main-pane-width "$(( $(tmux display -p -t "$W
 stop_panes() {  # graceful: type /exit into every pane, wait, then kill what is still there
   local id alive
   for id in "$@"; do tmux send-keys -t "$id" -l '/exit'; tmux send-keys -t "$id" Enter; done
-  for _ in $(seq $(( ${HERMES_TEAM_STOP_WAIT:-10} * 5 ))); do
+  for ((_i = 0; _i < ${HERMES_TEAM_STOP_WAIT:-10} * 5; _i++)); do
     alive=0; for id in "$@"; do pane_exists "$id" && alive=1; done
     [ $alive = 0 ] && return; sleep 0.2
   done
@@ -60,15 +62,15 @@ hh() { [ -z "${HERMES_HOME:-}" ] || printf ' HERMES_HOME=%q' "$HERMES_HOME"; }  
 
 v3_cmd() {  # v3_cmd <Role> <model> <query file>: env tells the plugin who it is; the named session is resumable
   printf 'env HERMES_TEAM_DIR=%q HERMES_TEAM_ROLE=%q HERMES_CREW_SESSION=%q%s hermes-shared chat --cli -s hermes-tmux-teammate --continue %q --create-if-missing --query-file %q' \
-    "$TEAM_DIR" "$1" "$SESSION" "$(hh)" "team-$(printf %s "$TEAM_DIR" | sha1sum | cut -c1-6)-$1" "$3"
+    "$TEAM_DIR" "$1" "$SESSION" "$(hh)" "team-$(short_hash "$TEAM_DIR")-$1" "$3"
   [ -z "$2" ] || printf ' -m %q' "$2"; }
 
 case "$1" in
 --kill)
   [ -n "$2" ] || { echo "usage: hermes-team-spawn --kill <Role>|--all" >&2; exit 2; }
-  ids=(); names=()
+  ids=(); names=(); want=$(lower "$2")
   while read -r id role; do
-    if [ "$2" = "--all" ] || [ "${role,,}" = "${2,,}" ]; then ids+=("$id"); names+=("$role"); fi
+    if [ "$2" = "--all" ] || [ "$(lower "$role")" = "$want" ]; then ids+=("$id"); names+=("$role"); fi
   done < <(teammates)
   if [ ${#ids[@]} -eq 0 ]; then [ "$2" = "--all" ] && exit 0; echo "no teammate '$2'" >&2; exit 1; fi
   stop_panes "${ids[@]}"; for r in "${names[@]}"; do echo "stopped $r"; done
@@ -77,20 +79,20 @@ case "$1" in
   shift; MODEL=""; [ "$1" = "--model" ] && { MODEL=$2; shift 2; }
   [ -n "$1" ] || { echo "usage: hermes-team-spawn --restart [--model <model>] <Role>" >&2; exit 2; }
   [ $V3 = 1 ] || { echo "--restart needs the hermes-crew plugin installed and enabled (run install.sh): a v2 teammate has no session to resume" >&2; exit 1; }
-  ROLE=$1; read -r id role < <(teammates | awk -v r="${ROLE,,}" 'tolower($2)==r')
+  ROLE=$1; read -r id role < <(teammates | awk -v r="$ROLE" 'tolower($2)==tolower(r)')
   [ -n "$id" ] || [ -f "$BRIEFS/$ROLE.md" ] || { echo "no teammate '$ROLE'" >&2; exit 1; }
   [ -z "$role" ] || ROLE=$role
   [ -n "$MODEL" ] || { [ -f "$BRIEFS/$ROLE.model" ] && MODEL=$(<"$BRIEFS/$ROLE.model"); }
   [ -z "$id" ] || stop_panes "$id"
   printf 'You were restarted. Run hermes-crew status and hermes-crew task list --mine, then continue your work.\n' > "$BRIEFS/$ROLE.restart.md"
   launch "$ROLE" "$MODEL" "$(v3_cmd "$ROLE" "$MODEL" "$BRIEFS/$ROLE.restart.md")"
-  echo "restarted $ROLE${MODEL:+ ($MODEL)} in pane $NEW (resumes session team-$(printf %s "$TEAM_DIR" | sha1sum | cut -c1-6)-$ROLE)"; exit 0 ;;
+  echo "restarted $ROLE${MODEL:+ ($MODEL)} in pane $NEW (resumes session team-$(short_hash "$TEAM_DIR")-$ROLE)"; exit 0 ;;
 esac
 
 MODEL=""; [ "$1" = "--model" ] && { MODEL=$2; shift 2; }
 [ $# -ge 2 ] || { echo "usage: hermes-team-spawn [--model <model>] <Role> <role description>" >&2; exit 2; }
 ROLE=$(tr -c 'A-Za-z0-9_\n' '_' <<<"$1"); shift; DESC="$*"
-case "${ROLE,,}" in lead|user) echo "'$ROLE' is a reserved role name - pick another" >&2; exit 2 ;; esac
+case "$(lower "$ROLE")" in lead|user) echo "'$ROLE' is a reserved role name - pick another" >&2; exit 2 ;; esac
 if [ -n "$MODEL" ] && [ -n "${HERMES_TEAM_MODELS:-}" ]; then
   case " $HERMES_TEAM_MODELS " in *" $MODEL "*) ;; *) echo "WARNING: model '$MODEL' is not in HERMES_TEAM_MODELS ($HERMES_TEAM_MODELS)" >&2 ;; esac
 fi

@@ -1,13 +1,19 @@
 """`hermes-crew` command line. Exit codes: 0 ok, 1 refused/failed, 2 usage."""
+
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
+import re
+import subprocess
 import sys
 import time
+from pathlib import Path
+from typing import Any, NoReturn
 
-from . import __version__, board, events, mailbox, state, status, tasks, verify
+from . import __version__, board, events, mailbox, status, store, tasks, verify
 from .team import RESERVED, SYSTEM, Team, current_role, is_lead, same_role, valid_role
 
 EPILOG = """examples:
@@ -21,7 +27,7 @@ class Refused(Exception):
 
 
 class Parser(argparse.ArgumentParser):
-    def error(self, message: str):  # usage errors: exit 2 with a hint
+    def error(self, message: str) -> NoReturn:  # usage errors: exit 2 with a hint
         self.print_usage(sys.stderr)
         sys.stderr.write(f"{self.prog}: error: {message}\n(see: {self.prog} --help)\n")
         sys.exit(2)
@@ -38,7 +44,9 @@ def recipients(team: Team, me: str, to: str) -> list[str]:
         if not same_role(me, "lead") and "lead" not in [r.lower() for r in rs]:
             rs.insert(0, "lead")
         if not rs:
-            raise Refused("REFUSED: no teammates to send to - spawn some first: hermes-team-spawn <Role> \"<description>\"")
+            raise Refused(
+                'REFUSED: no teammates to send to - spawn some first: hermes-team-spawn <Role> "<description>"'
+            )
         return rs
     if not valid_role(to):
         raise Refused(f"REFUSED: '{to}' is not a role name (letters, digits, _). Team: {_team_list(team)}")
@@ -46,8 +54,9 @@ def recipients(team: Team, me: str, to: str) -> list[str]:
         raise Refused(f"REFUSED: '{to}' cannot receive messages. Team: {_team_list(team)}")
     r = team.canon_role(to)
     if r is None:
-        raise Refused(f"REFUSED: no teammate '{to}'. Team: {_team_list(team)} - check the spelling, "
-                      f"or ask lead to spawn it")
+        raise Refused(
+            f"REFUSED: no teammate '{to}'. Team: {_team_list(team)} - check the spelling, or ask lead to spawn it"
+        )
     if same_role(r, me):
         raise Refused(f"REFUSED: you are {me}; send to someone else. Team: {_team_list(team)}")
     return [r]
@@ -60,7 +69,7 @@ def _team_list(team: Team) -> str:
     return " ".join(rs)
 
 
-def cmd_send(a) -> int:
+def cmd_send(a: argparse.Namespace) -> int:
     team, me = _ctx()
     body = " ".join(a.message).strip()
     if not body:
@@ -71,12 +80,12 @@ def cmd_send(a) -> int:
     return 0
 
 
-def _fmt_msg(m: dict) -> str:
+def _fmt_msg(m: dict[str, Any]) -> str:
     body = str(m.get("body", "")).replace("\n", "\n    ")
     return f"  #{mailbox.short_id(m['id'])} {str(m.get('sent_at', ''))[11:19]} from {m.get('from')}:\n    {body}"
 
 
-def cmd_inbox(a) -> int:
+def cmd_inbox(a: argparse.Namespace) -> int:
     team, me = _ctx()
     pend = mailbox.pending(team, me)
     if a.all:
@@ -84,15 +93,18 @@ def cmd_inbox(a) -> int:
         print(f"delivered to {me} (last {len(done)}):" if done else f"nothing delivered to {me} yet")
         for m in done:
             print(_fmt_msg(m))
-    print(f"{len(pend)} pending for {me} (delivered automatically when {me} is idle):" if pend
-          else f"no pending messages for {me}")
+    print(
+        f"{len(pend)} pending for {me} (delivered automatically when {me} is idle):"
+        if pend
+        else f"no pending messages for {me}"
+    )
     for m in pend:
         print(_fmt_msg(m))
     return 0
 
 
 # ---------------------------------------------------------------- status / watch / log
-def cmd_status(a) -> int:
+def cmd_status(a: argparse.Namespace) -> int:
     team = Team.resolve()
     if a.done_check:
         v = status.done_check(team)
@@ -106,7 +118,7 @@ def cmd_status(a) -> int:
     return 0
 
 
-def cmd_watch(a) -> int:
+def cmd_watch(a: argparse.Namespace) -> int:
     team = Team.resolve()
     try:
         while True:
@@ -119,7 +131,7 @@ def cmd_watch(a) -> int:
         return 0
 
 
-def cmd_log(a) -> int:
+def cmd_log(a: argparse.Namespace) -> int:
     team = Team.resolve()
     evs = events.read(team, n=a.n, kind=a.kind, role=a.role)
     if a.json:
@@ -137,23 +149,25 @@ def _deps(s: str | None) -> list[str]:
     return [d.strip() for d in (s or "").replace(" ", ",").split(",") if d.strip()]
 
 
-def _task_line(t: dict) -> str:
+def _task_line(t: dict[str, Any]) -> str:
     extra = ""
     if t["waiting_on"] and t["status"] != "done":
         extra = f"  (waits {','.join(t['waiting_on'])})"
     if t.get("reason") and t["status"] in ("blocked", "orphaned", "open", "claimed"):
         extra += f"  ! {t['reason']}"
-    return (f"{t['id']:<4} {t['status']:<11} {status._clip(t.get('owner') or '-', 12):<12} P{t['priority']}  "
-            f"{status._clip(t['title'], 44)}{extra}")
+    return (
+        f"{t['id']:<4} {t['status']:<11} {status._clip(t.get('owner') or '-', 12):<12} P{t['priority']}  "
+        f"{status._clip(t['title'], 44)}{extra}"
+    )
 
 
-def _when_ready(t: dict) -> str:
+def _when_ready(t: dict[str, Any]) -> str:
     if t["ready"]:
         return f". Start with: hermes-crew task start {t['id']}"
     return f". It waits for {', '.join(t['waiting_on'])}; you get a message when it is unblocked"
 
 
-def cmd_task(a) -> int:
+def cmd_task(a: argparse.Namespace) -> int:
     team, me = _ctx()
     op = a.op
     if op == "add":
@@ -161,7 +175,7 @@ def cmd_task(a) -> int:
         if owner:
             canon = team.canon_role(owner)
             if canon is None and valid_role(owner) and owner.lower() not in RESERVED:
-                canon = owner     # may be spawned later
+                canon = owner  # may be spawned later
             if canon is None:
                 raise Refused(f"REFUSED: '{owner}' cannot own tasks. Team: {_team_list(team)}")
             owner = canon
@@ -173,8 +187,7 @@ def cmd_task(a) -> int:
             bits.append(f"owner {t['owner']}")
         print(f"added {t['id']} '{t['title']}' ({', '.join(bits)})")
         if t.get("owner") and not same_role(t["owner"], me):
-            mailbox.send(team, SYSTEM, t["owner"], f"{me} assigned you {t['id']} '{t['title']}'"
-                         + _when_ready(t))
+            mailbox.send(team, SYSTEM, t["owner"], f"{me} assigned you {t['id']} '{t['title']}'" + _when_ready(t))
         return 0
     if op == "list":
         ts = tasks.mine(team, me) if a.mine else tasks.list_tasks(team)
@@ -182,14 +195,15 @@ def cmd_task(a) -> int:
             print(json.dumps(ts, indent=1, ensure_ascii=False))
             return 0
         if not ts:
-            print(f"no tasks{' owned by ' + me if a.mine else ''} - add one: hermes-crew task add \"<title>\"")
+            print(f'no tasks{" owned by " + me if a.mine else ""} - add one: hermes-crew task add "<title>"')
         for t in ts:
             print(_task_line(t))
         return 0
     if op == "show":
-        t = tasks.get(team, a.id)
-        if not t:
+        found = tasks.get(team, a.id)
+        if not found:
             raise Refused(f"REFUSED: no task {tasks.norm_id(a.id)} - see: hermes-crew task list")
+        t = found
         print(_task_line(t))
         for k in ("desc", "deps", "created_by", "created", "updated", "reason", "prev_owner"):
             if t.get(k):
@@ -204,7 +218,8 @@ def cmd_task(a) -> int:
         print("  history:")
         for ln in tasks.history(team, t["id"]):
             extra = {k: v for k, v in ln.items() if k not in ("ts", "t", "by", "op", "id")}
-            print(f"    {ln['t'][11:19]} {ln['by']:<12} {ln['op']:<8} {json.dumps(extra, ensure_ascii=False) if extra else ''}".rstrip())
+            detail = json.dumps(extra, ensure_ascii=False) if extra else ""
+            print(f"    {ln['t'][11:19]} {ln['by']:<12} {ln['op']:<8} {detail}".rstrip())
         return 0
     if op == "claim":
         t = tasks.claim(team, me, a.id)
@@ -228,10 +243,12 @@ def cmd_task(a) -> int:
         for x in tasks.list_tasks(team):
             if x["deps"] and x["ready"] and x["status"] != "done" and not before[x["id"]]["ready"]:
                 print(f"  -> {x['id']} is now ready; told {x.get('owner') or 'lead (no owner)'}")
-        v = verify.records(team, t["id"])
-        if not v:
-            print(f"  note: no verify record for {t['id']} - if it has a check, record it: "
-                  f"hermes-crew verify {t['id']} -- <command>")
+        recs = verify.records(team, t["id"])
+        if not recs:
+            print(
+                f"  note: no verify record for {t['id']} - if it has a check, record it: "
+                f"hermes-crew verify {t['id']} -- <command>"
+            )
     elif op == "assign":
         owner = team.canon_role(a.role) or a.role
         if not valid_role(owner) or owner.lower() in (SYSTEM, "user"):
@@ -245,7 +262,7 @@ def cmd_task(a) -> int:
 
 
 # ---------------------------------------------------------------- verify / board / doctor
-def cmd_verify(a) -> int:
+def cmd_verify(a: argparse.Namespace) -> int:
     team, me = _ctx()
     cmd = list(a.command)
     if cmd and cmd[0] == "--":
@@ -255,8 +272,9 @@ def cmd_verify(a) -> int:
         return 2
     t = tasks.get(team, a.task)
     if t is None:
-        raise Refused(f"REFUSED: no task {tasks.norm_id(a.task)} - see: hermes-crew task list "
-                      f"(evidence must belong to a task)")
+        raise Refused(
+            f"REFUSED: no task {tasks.norm_id(a.task)} - see: hermes-crew task list (evidence must belong to a task)"
+        )
 
     def echo(b: bytes) -> None:
         sys.stdout.buffer.write(b)
@@ -264,24 +282,59 @@ def cmd_verify(a) -> int:
 
     rec = verify.run(team, me, t["id"], cmd, timeout=a.timeout, echo=echo)
     sys.stdout.flush()
-    print(f"\nverify {t['id']}: exit {rec['exit']} in {rec['duration_s']:g} s - recorded "
-          f"(output sha {rec['out_sha']})", file=sys.stderr)
+    print(
+        f"\nverify {t['id']}: exit {rec['exit']} in {rec['duration_s']:g} s - recorded (output sha {rec['out_sha']})",
+        file=sys.stderr,
+    )
     return int(rec["exit"]) if 0 <= int(rec["exit"]) < 256 else 1
 
 
-def cmd_board(a) -> int:
+LOCK_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+
+
+def lock_path(name: str) -> Path:
+    """A name with a "/" is a lock file path; a bare name is <team dir>/.team/locks/<name>.lock."""
+    if "/" in name:
+        return Path(name)
+    if not LOCK_NAME.match(name):
+        raise Refused(f"REFUSED: bad lock name '{name}' (letters, digits, _ . -; or a path containing /)")
+    return Team.resolve().path("locks", f"{name}.lock")
+
+
+def cmd_lock(a: argparse.Namespace) -> int:
+    cmd = list(a.command)
+    if cmd and cmd[0] == "--":
+        cmd = cmd[1:]
+    if not cmd:
+        print("usage: hermes-crew lock <name|path> -- <command...>", file=sys.stderr)
+        return 2
+    with store.flock(lock_path(a.name)):
+        try:
+            rc = subprocess.run(cmd, check=False).returncode
+        except OSError as e:
+            print(f"hermes-crew lock: cannot run {cmd[0]!r}: {e}", file=sys.stderr)
+            return 127
+    return rc if rc >= 0 else 128 - rc  # killed by signal N -> 128+N, like a shell
+
+
+def cmd_board(a: argparse.Namespace) -> int:
     return board.main(list(a.args))
 
 
-def cmd_doctor(a) -> int:
+def cmd_doctor(a: argparse.Namespace) -> int:
     from . import doctor
+
     return doctor.main(json_out=a.json)
 
 
 # ---------------------------------------------------------------- parser
 def build_parser() -> argparse.ArgumentParser:
-    p = Parser(prog="hermes-crew", description="Hermes Crew: messages, tasks, board and status of a Hermes agent team.",
-               epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = Parser(
+        prog="hermes-crew",
+        description="Hermes Crew: messages, tasks, board and status of a Hermes agent team.",
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--version", action="version", version=f"hermes-crew {__version__}")
     sub = p.add_subparsers(dest="cmd", metavar="<command>", parser_class=Parser)
 
@@ -304,8 +357,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--interval", type=float, default=2.0)
     s.set_defaults(fn=cmd_watch)
 
-    s = sub.add_parser("board", help="decide|own|transfer|release|approve|status (same as hermes-team-board)",
-                       add_help=False)
+    s = sub.add_parser(
+        "board", help="decide|own|transfer|release|approve|status (same as hermes-team-board)", add_help=False
+    )
     s.add_argument("args", nargs=argparse.REMAINDER)
     s.set_defaults(fn=cmd_board)
 
@@ -329,7 +383,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("id")
     g = x.add_mutually_exclusive_group()
     g.add_argument("--note", metavar="TEXT", help="handoff note for whoever continues (saved as .team/handoff/<id>.md)")
-    g.add_argument("--handoff", metavar="FILE", help="an existing file with the handoff note; copied to .team/handoff/<id>.md")
+    g.add_argument(
+        "--handoff", metavar="FILE", help="an existing file with the handoff note; copied to .team/handoff/<id>.md"
+    )
     x = ts.add_parser("assign")
     x.add_argument("id")
     x.add_argument("role")
@@ -343,6 +399,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--timeout", type=float, default=None)
     s.add_argument("command", nargs="*", help="the command to run, after --")
     s.set_defaults(fn=cmd_verify)
+
+    s = sub.add_parser("lock", help="lock <name|path> -- <command...>: run it holding an exclusive lock (flock)")
+    s.add_argument("name", help="bare name = .team/locks/<name>.lock; with a / = that file")
+    s.add_argument("command", nargs="*", help="the command to run, after --")
+    s.set_defaults(fn=cmd_lock)
 
     s = sub.add_parser("log", help="recent events [-n N] [--kind PREFIX] [--role R]")
     s.add_argument("-n", type=int, default=30)
@@ -359,19 +420,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
-    if argv[:1] == ["board"]:                 # raw pass-through: board parses its own args
+    if argv[:1] == ["board"]:  # raw pass-through: board parses its own args
         return board.main(argv[1:])
     p = build_parser()
     cmd_after = None
-    if argv[:1] == ["verify"] and "--" not in argv:   # `verify T1 pytest -q`: the command starts after <task>
+    if argv[:1] == ["verify"] and "--" not in argv:  # `verify T1 pytest -q`: the command starts after <task>
         i = 1
         while i < len(argv) and argv[i].startswith("-") and argv[i] not in ("-h", "--help"):
             i += 1 if "=" in argv[i] else 2
         if i + 1 < len(argv):
-            argv = argv[: i + 1] + ["--"] + argv[i + 1:]
-    if argv[:1] == ["verify"] and "--" in argv:   # options may come before or after <task>
+            argv = [*argv[: i + 1], "--", *argv[i + 1 :]]
+    if argv[:1] == ["lock"] and "--" not in argv and len(argv) > 2 and not argv[1].startswith("-"):
+        argv = [*argv[:2], "--", *argv[2:]]  # `lock NAME cmd...`: the command starts after <name>
+    if argv[:1] in (["verify"], ["lock"]) and "--" in argv:  # options may come before or after <task>
         i = argv.index("--")
-        argv, cmd_after = argv[:i], argv[i + 1:]
+        argv, cmd_after = argv[:i], argv[i + 1 :]
     a = p.parse_args(argv)
     if cmd_after is not None:
         a.command = cmd_after
@@ -379,15 +442,14 @@ def main(argv: list[str] | None = None) -> int:
         p.print_help(sys.stderr)
         return 2
     try:
-        return a.fn(a)
+        rc: int = a.fn(a)
+        return rc
     except (Refused, tasks.TaskError, board.BoardError) as e:
         print(str(e), file=sys.stderr)
         return 1
     except BrokenPipeError:
-        try:
-            sys.stdout = open(os.devnull, "w")
-        except OSError:
-            pass
+        with contextlib.suppress(OSError):
+            sys.stdout = open(os.devnull, "w")  # noqa: SIM115 - replaces stdout until exit; never closed
         return 1
 
 

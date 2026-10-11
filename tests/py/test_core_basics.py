@@ -1,4 +1,5 @@
 """team.py, store.py, events.py, state.py"""
+
 from __future__ import annotations
 
 import json
@@ -6,10 +7,9 @@ import multiprocessing as mp
 import os
 import time
 
-import pytest
-
 import mp_workers
-from hermes_crew import events, state, store
+import pytest
+from hermes_crew import __version__, events, state, store
 from hermes_crew.team import Team, current_role, is_lead, same_role, valid_role
 
 
@@ -36,7 +36,7 @@ def test_ensure_writes_gitignore(tmp_path):
 
 
 def test_current_role(monkeypatch):
-    assert current_role() == "user"             # no env, no tmux pane
+    assert current_role() == "user"  # no env, no tmux pane
     monkeypatch.setenv("HERMES_TEAM_ROLE", "Engineer")
     assert current_role() == "Engineer"
     assert current_role(env={}) == "user"
@@ -73,7 +73,7 @@ def test_atomic_json(tmp_path):
     store.write_json_atomic(p, {"k": [1, 2]})
     assert store.read_json(p) == {"k": [1, 2]}
     assert store.read_json(tmp_path / "nope", default=5) == 5
-    assert [f.name for f in p.parent.iterdir()] == ["x.json"]   # no temp leftovers
+    assert [f.name for f in p.parent.iterdir()] == ["x.json"]  # no temp leftovers
 
 
 # ---------------------------------------------------------------- events
@@ -107,7 +107,7 @@ def test_events_concurrent_appends_are_whole_lines(team):
 # ---------------------------------------------------------------- state
 def test_state_update_and_events(team):
     r = state.update(team, "Eng", state="starting", pid=os.getpid(), heartbeat=time.time())
-    assert r["state"] == "starting" and r["tokens_in"] == 0 and r["plugin_version"] == "3.0.0"
+    assert r["state"] == "starting" and r["tokens_in"] == 0 and r["plugin_version"] == __version__
     since0 = r["since"]
     time.sleep(0.01)
     r = state.update(team, "Eng", state="busy", turn_id="t1")
@@ -116,10 +116,10 @@ def test_state_update_and_events(team):
     assert r["blocked_kind"] == "approval"
     r = state.update(team, "Eng", state="busy")
     assert r["blocked_kind"] is None
-    r = state.heartbeat(team, "Eng")                       # no state change -> no event
+    r = state.heartbeat(team, "Eng")  # no state change -> no event
     kinds = [(e["from"], e["to"]) for e in events.read(team, kind="state")]
     assert kinds == [(None, "starting"), ("starting", "busy"), ("busy", "blocked"), ("blocked", "busy")]
-    assert state.read(team, "eng")["state"] == "busy"     # case-insensitive read
+    assert state.read(team, "eng")["state"] == "busy"  # case-insensitive read
     with pytest.raises(ValueError):
         state.update(team, "Eng", state="sleepy")
 
@@ -137,7 +137,7 @@ def test_alive_dead(team):
     assert state.is_alive(rec, now) and not state.is_dead(rec, now)
     assert not state.is_alive(rec, now + 61)
     assert state.is_dead(rec, now + 61)
-    gone = dict(rec, pid=2 ** 22 + 12345)
+    gone = dict(rec, pid=2**22 + 12345)
     assert not state.is_alive(gone, now)
     assert not state.is_dead(dict(gone, state="exited"), now)
 
@@ -146,3 +146,13 @@ def test_all_agents_lead_first(team):
     for r in ("Zed", "lead", "Amy"):
         state.update(team, r, state="idle")
     assert [a["role"] for a in state.all_agents(team)] == ["lead", "Amy", "Zed"]
+
+
+def test_ppid_without_proc_uses_ps(monkeypatch):
+    """macOS has no /proc: the parent pid comes from `ps -o ppid=`."""
+    import hermes_crew.team as team_mod
+
+    real_exists = os.path.exists
+    monkeypatch.setattr(team_mod.os.path, "exists", lambda p: False if str(p).startswith("/proc") else real_exists(p))
+    assert team_mod._ppid(os.getpid()) == os.getppid()
+    assert team_mod._ppid(2**30) == 0  # no such process
